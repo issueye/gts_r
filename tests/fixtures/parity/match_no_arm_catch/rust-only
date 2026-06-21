@@ -1,0 +1,1 @@
+MatchError is caught and inspected on the Rust side while Go/Rust error-object parity is still divergent.

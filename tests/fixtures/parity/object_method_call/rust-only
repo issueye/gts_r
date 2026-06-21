@@ -1,0 +1,1 @@
+Go runner panics on this object method/this fixture; keep it as Rust CLI coverage.

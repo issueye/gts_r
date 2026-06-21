@@ -1,0 +1,44 @@
+[package]
+name = "gts"
+version = "0.1.0"
+edition = "2021"
+description = "GoScript — a JavaScript-style dynamic scripting language interpreter implemented in Rust"
+license = "MIT"
+
+[lib]
+name = "gts"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gs"
+path = "src/bin/gs.rs"
+
+[[bin]]
+name = "bench_client"
+path = "bench/bench_client.rs"
+
+[features]
+default = []
+tokio = ["dep:tokio"]
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync", "io-util", "net"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["winsock2", "ws2def", "mswsock", "ioapiset", "minwinbase", "handleapi", "winnt"] }
+base64 = "0.21"
+chrono = "0.4"
+flate2 = "1"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+serde_yaml = "0.9"
+quick-xml = "0.36"
+zip = "2"
+ureq = "2"
+rusqlite = { version = "0.31", features = ["bundled"] }
+tiny_http = "0.12"
+
+[dev-dependencies]
+tempfile = "3"

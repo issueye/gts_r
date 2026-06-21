@@ -1,0 +1,33 @@
+===== @std/web FULL benchmark (release) =====
+
+>>> SERIAL (count loop)
+  [/fast c=16 n=2000]
+      throughput : 18098 req/s
+      latency(us): avg=860  p50=801  p95=1310  p99=1881  max=2563
+  [/io?ms=50 c=32 n=160]
+      throughput : 20 req/s
+      latency(us): avg=1464250  p50=1621065  p95=1623621  p99=1624113  max=1624324
+  [/cpu?n=200000 c=16 n=80]
+      throughput : 12 req/s
+      latency(us): avg=1248806  p50=1176288  p95=1998748  p99=2018244  max=2056209
+>>> WORKERS=4
+  [/fast c=16 n=2000]
+      throughput : 16517 req/s
+      latency(us): avg=945  p50=669  p95=1403  p99=2869  max=23582
+  [/io?ms=50 c=32 n=160]
+      throughput : 79 req/s
+      latency(us): avg=369761  p50=405132  p95=406749  p99=407210  max=407400
+  [/cpu?n=200000 c=16 n=80]
+      throughput : 36 req/s
+      latency(us): avg=408374  p50=438041  p95=475401  p99=484646  max=485140
+>>> WORKERS=8
+  [/fast c=16 n=2000]
+      throughput : 13608 req/s
+      latency(us): avg=1162  p50=1126  p95=1676  p99=1853  max=2476
+  [/io?ms=50 c=32 n=160]
+      throughput : 158 req/s
+      latency(us): avg=186434  p50=201896  p95=202650  p99=202839  max=202900
+  [/cpu?n=200000 c=16 n=80]
+      throughput : 48 req/s
+      latency(us): avg=305900  p50=310358  p95=394850  p99=451737  max=470230
+===== DONE =====
