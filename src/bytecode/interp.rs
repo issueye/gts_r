@@ -1005,6 +1005,20 @@ impl<'a> VmState<'a> {
                     Ok(r)
                 }
             }
+            Object::Hash(h) => {
+                if let Some(Object::Builtin(b)) = h.borrow().get("__call").cloned() {
+                    let mut ctx = CallContext::new(&self.env, pos);
+                    ctx.receiver = b.extra.clone().or(this);
+                    let result = (b.func)(&mut ctx, &args);
+                    if result.is_runtime_error() {
+                        Err(result)
+                    } else {
+                        Ok(result)
+                    }
+                } else {
+                    Err(new_error(pos, "TypeError: object is not callable"))
+                }
+            }
             _ => Err(new_error(
                 pos,
                 format!("TypeError: {} is not callable", callee.type_tag()),
@@ -1771,6 +1785,14 @@ mod tests {
             Object::Boolean(false)
         ));
     }
+
+    #[test]
+    fn callable_hash_globals_match_treewalker() {
+        let (tree, bytecode) = run_src_tree_and_bytecode("String(Date.now()).length > 0;");
+        assert!(matches!(tree, Object::Boolean(true)));
+        assert!(matches!(bytecode, Object::Boolean(true)));
+    }
+
     #[test]
     fn precedence_mul_before_add() {
         assert!(matches!(run_src("2 + 3 * 4"), Object::Number(n) if n == 14.0));
