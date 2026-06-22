@@ -130,6 +130,9 @@ pub enum Opcode {
     /// Load a module through the VM importer callback. Operand: u16 source
     /// string index.
     ImportModule = 95,
+    /// Pop a value and write it to the current module exports object. Operand:
+    /// u16 export name string index.
+    ExportName = 96,
 }
 
 impl Opcode {
@@ -200,6 +203,7 @@ impl Opcode {
             93 => Opcode::ThrowMatchError,
             94 => Opcode::TypeOf,
             95 => Opcode::ImportModule,
+            96 => Opcode::ExportName,
             _ => return None,
         })
     }
@@ -268,6 +272,7 @@ impl Opcode {
             Opcode::ThrowMatchError => "THROW_MATCH_ERROR",
             Opcode::TypeOf => "TYPEOF",
             Opcode::ImportModule => "IMPORT_MODULE",
+            Opcode::ExportName => "EXPORT_NAME",
         }
     }
 }

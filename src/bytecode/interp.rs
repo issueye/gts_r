@@ -226,6 +226,30 @@ impl<'a> VmState<'a> {
                 };
                 self.stack.push(module);
             }
+            Opcode::ExportName => {
+                let name_idx = self.chunk.read_u16(self.ip) as usize;
+                self.ip += 2;
+                let pos = self.chunk.position_at(self.ip - 3);
+                let name = self.read_string_const(name_idx, pos.clone(), "EXPORT_NAME")?;
+                let value = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                let exports = self
+                    .env
+                    .borrow()
+                    .get("exports")
+                    .unwrap_or(Object::Undefined);
+                match exports {
+                    Object::Hash(h) => h.borrow_mut().set(name, value),
+                    other => {
+                        return Err(new_error(
+                            pos,
+                            format!("TypeError: cannot export from {}", other.type_tag()),
+                        ));
+                    }
+                }
+            }
             Opcode::Call => {
                 let encoded_arg_count = self.chunk.read_u16(self.ip);
                 let has_this_receiver = encoded_arg_count & 0x8000 != 0;
@@ -1230,6 +1254,16 @@ mod tests {
         Object::Hash(module)
     }
 
+    fn run_module_src(src: &str) -> (Object, Object) {
+        let chunk = compile_src(src);
+        let vm = VirtualMachine::new();
+        let env = Environment::new_root(vm);
+        let exports = Object::Hash(Rc::new(RefCell::new(HashData::default())));
+        env.borrow_mut().set_here("exports", exports.clone());
+        let result = interpret(&chunk, &env);
+        (result, exports)
+    }
+
     fn run_src_tree_and_bytecode(src: &str) -> (Object, Object) {
         let lexer = Lexer::new(src);
         let mut parser = Parser::new(lexer, "t.gs");
@@ -1424,6 +1458,59 @@ mod tests {
         };
         assert_eq!(data.borrow().name, "ImportError");
         assert_eq!(data.borrow().message, "module loading is not configured");
+    }
+
+    #[test]
+    fn export_declaration_writes_named_and_alias_exports() {
+        let (result, exports) = run_module_src(
+            r#"
+            export const value = 21;
+            export function double(x) { return x * 2; }
+            export { value as answer };
+            "#,
+        );
+        assert!(matches!(result, Object::Undefined));
+        let Object::Hash(exports) = exports else {
+            panic!("expected exports hash");
+        };
+        let exports = exports.borrow();
+        assert!(matches!(exports.get("value"), Some(Object::Number(n)) if *n == 21.0));
+        assert!(matches!(exports.get("answer"), Some(Object::Number(n)) if *n == 21.0));
+        assert!(matches!(exports.get("double"), Some(Object::Closure(_))));
+    }
+
+    #[test]
+    fn export_default_expression_writes_default_export() {
+        let (result, exports) = run_module_src(r#"export default "hello";"#);
+        assert!(matches!(result, Object::Undefined));
+        let Object::Hash(exports) = exports else {
+            panic!("expected exports hash");
+        };
+        assert!(
+            matches!(exports.borrow().get("default"), Some(Object::String(s)) if s.as_ref() == "hello")
+        );
+    }
+
+    #[test]
+    fn reexport_from_module_copies_source_exports() {
+        let chunk = compile_src(r#"export { named as alias, extra } from "mod";"#);
+        let vm = VirtualMachine::new();
+        vm.set_importer(Rc::new(|_env, spec| {
+            assert_eq!(spec, "mod");
+            Ok(module_fixture())
+        }));
+        let env = Environment::new_root(vm);
+        let exports = Object::Hash(Rc::new(RefCell::new(HashData::default())));
+        env.borrow_mut().set_here("exports", exports.clone());
+        let result = interpret(&chunk, &env);
+
+        assert!(matches!(result, Object::Undefined));
+        let Object::Hash(exports) = exports else {
+            panic!("expected exports hash");
+        };
+        let exports = exports.borrow();
+        assert!(matches!(exports.get("alias"), Some(Object::String(s)) if s.as_ref() == "N"));
+        assert!(matches!(exports.get("extra"), Some(Object::String(s)) if s.as_ref() == "X"));
     }
 
     #[test]

@@ -227,8 +227,8 @@
 
 - [x] 8.1 `Import` 编译：调用 `vm.rs:30 ImporterFn`，导出值绑定到本地槽
   - 证据：`src/bytecode/opcode.rs` 新增 `ImportModule` 指令；`src/bytecode/compiler.rs` 将 `Stmt::Import` 编译为 `ImportModule` + `Dup/GetProperty/StoreName`，覆盖 default、namespace、named、alias 绑定；`src/bytecode/interp.rs` 通过 `env.vm.importer()` 调用 `ImporterFn`，无 importer 时返回 `ImportError: module loading is not configured`；新增单测 `bytecode::compiler::tests::compiles_import_bindings_from_module_object`、`bytecode::interp::tests::import_statement_binds_default_named_alias_and_namespace`、`bytecode::interp::tests::import_statement_reports_missing_importer`；`cargo fmt --all --check` passed；`cargo test --lib bytecode` 103 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
-- [ ] 8.2 `Export` 编译：求值后写入模块导出表；re-export `export { } from "..."`
-  - 证据：（待填）
+- [x] 8.2 `Export` 编译：求值后写入模块导出表；re-export `export { } from "..."`
+  - 证据：`src/bytecode/opcode.rs` 新增 `ExportName` 指令；`src/bytecode/compiler.rs` 支持 `Stmt::Export`，覆盖 named decl export、`export default <expr>`、`export { local as alias }` 与 `export { ... } from "..."` re-export；`src/bytecode/interp.rs` 的 `ExportName` 从当前环境读取 `exports` 对象并写入导出名；新增单测 `bytecode::compiler::tests::compiles_export_declarations_to_export_name`、`bytecode::interp::tests::export_declaration_writes_named_and_alias_exports`、`export_default_expression_writes_default_export`、`reexport_from_module_copies_source_exports`；`cargo fmt --all --check` passed；`cargo test --lib bytecode` 107 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
 - [ ] 8.3 循环依赖检测（复用现有 module cache）
   - 证据：（待填）
 - [ ] 8.4 阶段 8 契约门（VM 单跑全绿）：
@@ -280,10 +280,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7 Match 全集与类型注解已完成并收口；阶段 8.1 Import 编译已完成
-**下一条 TODO**：继续阶段 8，推进 8.2 `Export` 编译：求值后写入模块导出表；re-export `export { } from "..."`
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7 Match 全集与类型注解已完成并收口；阶段 8.1 Import 编译已完成；阶段 8.2 Export 编译已完成
+**下一条 TODO**：继续阶段 8，推进 8.3 循环依赖检测（复用现有 module cache）
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 8.1 已完成：Import 编译与 importer 绑定路径；下一步推进 Export 编译）
+**最后更新**：2026-06-22（阶段 8.2 已完成：Export 编译与 re-export 路径；下一步推进循环依赖检测）
 
 ---
 

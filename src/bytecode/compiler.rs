@@ -136,6 +136,7 @@ fn compile_stmt(
         }
         Stmt::Try(s) => compile_try(s, chunk, loops, resolutions),
         Stmt::Import(s) => compile_import(s, chunk),
+        Stmt::Export(s) => compile_export(s, chunk, loops, resolutions),
         Stmt::FuncDecl(f) => {
             // Compile the body to a proto (which lives in this chunk's proto
             // table), emit OP_CLOSURE to construct the closure value, then
@@ -305,6 +306,85 @@ fn compile_import_binding(
     let local_idx = chunk.add_constant(str_obj(local_name));
     chunk.write_op(Opcode::StoreName, pos.clone());
     chunk.write_u16(local_idx, pos);
+}
+
+fn compile_export(
+    s: &crate::ast::ExportDecl,
+    chunk: &mut Chunk,
+    loops: &mut Vec<LoopFrame>,
+    resolutions: &ResolutionMap,
+) -> Result<(), Object> {
+    if !s.from.is_empty() {
+        let source = crate::evaluator::eval_core::strip_quotes(&s.from);
+        let source_idx = chunk.add_constant(str_obj(source));
+        chunk.write_op(Opcode::ImportModule, s.pos.clone());
+        chunk.write_u16(source_idx, s.pos.clone());
+        for spec in &s.specifiers {
+            compile_reexport_spec(spec, s.pos.clone(), chunk);
+        }
+        chunk.write_op(Opcode::Pop, s.pos.clone());
+        return Ok(());
+    }
+
+    if let Some(decl) = &s.decl {
+        if s.is_default {
+            if let Stmt::Expr(expr_stmt) = decl.as_ref() {
+                compile_expr(&expr_stmt.expr, chunk, resolutions)?;
+                compile_export_stack_value("default", s.pos.clone(), chunk);
+            } else {
+                compile_stmt(decl, chunk, loops, false, resolutions)?;
+            }
+        } else {
+            compile_stmt(decl, chunk, loops, false, resolutions)?;
+            if let Some(name) = exported_decl_name(decl) {
+                compile_export_local_name(&name, &name, s.pos.clone(), chunk);
+            }
+        }
+    }
+
+    for spec in &s.specifiers {
+        compile_export_local_name(&spec.name, &spec.alias, s.pos.clone(), chunk);
+    }
+    Ok(())
+}
+
+fn exported_decl_name(stmt: &Stmt) -> Option<String> {
+    match stmt {
+        Stmt::FuncDecl(f) => Some(f.name.clone()),
+        Stmt::ClassDecl(c) => Some(c.name.clone()),
+        Stmt::Let(l) => Some(l.name.clone()),
+        Stmt::Const(c) => Some(c.name.clone()),
+        Stmt::Var(v) => Some(v.name.clone()),
+        _ => None,
+    }
+}
+
+fn compile_reexport_spec(
+    spec: &crate::ast::ExportSpec,
+    pos: crate::ast::Position,
+    chunk: &mut Chunk,
+) {
+    chunk.write_op(Opcode::Dup, pos.clone());
+    let property_idx = chunk.add_constant(str_obj(spec.name.clone()));
+    chunk.write_op(Opcode::GetProperty, pos.clone());
+    chunk.write_u16(property_idx, pos.clone());
+    compile_export_stack_value(&spec.alias, pos, chunk);
+}
+
+fn compile_export_local_name(
+    local_name: &str,
+    exported_name: &str,
+    pos: crate::ast::Position,
+    chunk: &mut Chunk,
+) {
+    emit_load_name(chunk, local_name, pos.clone());
+    compile_export_stack_value(exported_name, pos, chunk);
+}
+
+fn compile_export_stack_value(exported_name: &str, pos: crate::ast::Position, chunk: &mut Chunk) {
+    let exported_idx = chunk.add_constant(str_obj(exported_name));
+    chunk.write_op(Opcode::ExportName, pos.clone());
+    chunk.write_u16(exported_idx, pos);
 }
 
 /// Compile `if (cond) { ... } else { ... }`.
@@ -869,7 +949,8 @@ fn operand_width(op: Opcode) -> u8 {
         | Opcode::New
         | Opcode::Call
         | Opcode::Closure
-        | Opcode::ImportModule => 2,
+        | Opcode::ImportModule
+        | Opcode::ExportName => 2,
         Opcode::StoreTypedName => 4,
         Opcode::Jump | Opcode::JumpIfFalse | Opcode::JumpIfTrue | Opcode::Loop => 4,
         Opcode::LoadLocal | Opcode::StoreLocal | Opcode::LoadUpvalue | Opcode::StoreUpvalue => 1,
@@ -1800,6 +1881,17 @@ mod tests {
             .constants
             .iter()
             .any(|value| matches!(value, Object::String(s) if s.as_ref() == "mod")));
+    }
+
+    #[test]
+    fn compiles_export_declarations_to_export_name() {
+        let chunk = compile_src("export const value = 42; export { value as answer };");
+        let spine = decode_opcode_spine(&chunk);
+        assert!(spine.contains(&Opcode::ExportName));
+        assert!(chunk
+            .constants
+            .iter()
+            .any(|value| matches!(value, Object::String(s) if s.as_ref() == "answer")));
     }
 
     #[test]
