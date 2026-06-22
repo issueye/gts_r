@@ -25,4 +25,7 @@ pub use value::{
     Builtin, BuiltinFn, CallContext, Class, ErrorData, Function, HashData, Instance, MapData,
     NativeCtor, Object, RegexpData, SetData,
 };
-pub use vm::{vm_error, EnvRef, EvaluatorFn, ImporterFn, NodeRef, VirtualMachine};
+pub use vm::{
+    vm_error, EnvRef, EvaluatorFn, ImporterFn, NodeRef, VirtualMachine, EXEC_MODE_BYTECODE,
+    EXEC_MODE_TREEWALK,
+};

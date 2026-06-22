@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::ast::{Position, Program};
@@ -16,7 +17,7 @@ use crate::module::{
 };
 use crate::object::{
     new_error, str_obj, ArrayData, Builtin, BuiltinFn, Environment, HashData, Object,
-    VirtualMachine,
+    VirtualMachine, EXEC_MODE_BYTECODE,
 };
 use crate::parser::Parser;
 use crate::stdlib::load_native_module;
@@ -129,7 +130,7 @@ impl Session {
         self.root.borrow_mut().module_dir = module_dir.to_string_lossy().into_owned();
         let exports = Object::Hash(Rc::new(RefCell::new(HashData::default())));
         install_module_bindings(&self.root, exports);
-        let mut result = eval_program(&program, &self.root);
+        let mut result = eval_program_for_session(&program, &self.root);
         if !result.is_runtime_error() && call_main {
             result = self.call_main_if_present();
         }
@@ -282,7 +283,7 @@ impl Session {
                 .into_owned();
             install_module_bindings(&scope, module.clone());
 
-            let result = eval_program(&program, &scope);
+            let result = eval_program_for_session(&program, &scope);
             if result.is_runtime_error() {
                 Err(result)
             } else {
@@ -330,7 +331,7 @@ impl Session {
         self.root.borrow_mut().module_dir = module_dir;
         let exports = Object::Hash(Rc::new(RefCell::new(HashData::default())));
         install_module_bindings(&self.root, exports);
-        let mut result = eval_program(&program, &self.root);
+        let mut result = eval_program_for_session(&program, &self.root);
         if !result.is_runtime_error() && call_main {
             result = self.call_main_if_present();
         }
@@ -368,6 +369,18 @@ fn parse_source(source: &str, file: &Path) -> RuntimeResult<Program> {
         ))
     } else {
         Ok(program)
+    }
+}
+
+fn eval_program_for_session(program: &Program, env: &crate::object::EnvRef) -> Object {
+    let vm = env.borrow().vm.clone();
+    if vm.exec_mode.load(Ordering::Relaxed) == EXEC_MODE_BYTECODE {
+        match crate::bytecode::compile(program) {
+            Ok(chunk) => crate::bytecode::interpret(&chunk, env),
+            Err(error) => error,
+        }
+    } else {
+        eval_program(program, env)
     }
 }
 
