@@ -548,6 +548,90 @@ response.ok;
     handle.join().expect("server thread should finish");
 }
 
+#[test]
+fn session_process_argv_reflects_run_options() {
+    // argv[0] is the script path, followed by clean application args.
+    // Both the global `process` object and `require("@std/process")` must agree.
+    let dir = unique_temp_dir("gts-runtime-argv");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    fs::write(
+        dir.join("main.gs"),
+        r#"
+let procMod = require("@std/process");
+let argvOk = JSON.stringify(procMod.argv) === JSON.stringify(["main.gs", "--session", "abc"]);
+let globalOk = JSON.stringify(process.argv) === JSON.stringify(["main.gs", "--session", "abc"]);
+let argv0Ok = procMod.argv0 === "main.gs";
+argvOk && globalOk && argv0Ok;
+"#,
+    )
+    .expect("write main");
+
+    let session = Session::new();
+    let result = session
+        .run_file_with_options(
+            dir.join("main.gs"),
+            RunOptions {
+                argv: vec![
+                    "main.gs".to_string(),
+                    "--session".to_string(),
+                    "abc".to_string(),
+                ],
+                call_main: false,
+                timeout: None,
+            },
+        )
+        .expect("script should run");
+
+    assert_bool(result, true);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn session_sse_reader_parses_incrementally_from_readline_stream() {
+    // A fake stream that yields lines one at a time via readLine() — this is
+    // how the new http.stream body behaves. sse.reader must parse events
+    // incrementally from readLine() rather than reading a pre-buffered .text.
+    let session = Session::new();
+    let result = session
+        .run_source(
+            r#"
+let sse = require("@std/sse");
+
+// Build a fake stream whose readLine() pops lines from a cursor, returning
+// null at EOF. This emulates the chunked http.stream body.
+let lines = [
+  "event: message",
+  "data: {\"ok\":true}",
+  "",
+  "data: second",
+  "",
+];
+let cursor = 0;
+let stream = {
+  readLine: function() {
+    if (cursor >= lines.length) {
+      return null;
+    }
+    return lines[cursor++];
+  }
+};
+
+let reader = sse.reader(stream);
+let first = reader.next();
+let second = reader.next();
+let third = reader.next();
+let firstOk = first !== null && first.event === "message" && first.data === "{\"ok\":true}";
+let secondOk = second !== null && second.event === "message" && second.data === "second";
+let thirdOk = third === null;
+firstOk && secondOk && thirdOk;
+"#,
+            "sse-incremental.gs",
+        )
+        .expect("script should run");
+
+    assert_bool(result, true);
+}
+
 fn assert_number(value: Object, expected: f64) {
     match value {
         Object::Number(actual) => assert_eq!(actual, expected),

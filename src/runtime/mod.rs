@@ -210,12 +210,30 @@ impl Session {
     }
 
     fn refresh_process_argv(&self) {
-        let args = Object::Array(Rc::new(RefCell::new(ArrayData {
-            elements: self.vm.argv.borrow().iter().cloned().map(str_obj).collect(),
-        })));
+        let argv_snapshot: Vec<String> = self.vm.argv.borrow().clone();
+        // Publish the same normalized argv to the stdlib thread-local so that
+        // `require("@std/process")` agrees with the global `process` object.
+        crate::stdlib::set_runtime_argv(argv_snapshot.clone());
+
+        let elements: Vec<Object> = argv_snapshot.iter().map(|s| str_obj(s.clone())).collect();
+        let args = Object::Array(Rc::new(RefCell::new(ArrayData { elements })));
+        let argv0 = argv_snapshot
+            .first()
+            .map(|s| str_obj(s.clone()))
+            .unwrap_or(Object::Undefined);
+
+        let env_hash = Rc::new(RefCell::new(HashData::default()));
+        for (k, v) in std::env::vars() {
+            env_hash.borrow_mut().set(k, str_obj(v));
+        }
+
         let process = Object::Hash(Rc::new(RefCell::new(HashData::default())));
         if let Object::Hash(h) = &process {
             h.borrow_mut().set("argv", args);
+            h.borrow_mut().set("argv0", argv0);
+            h.borrow_mut().set("env", Object::Hash(env_hash));
+            h.borrow_mut()
+                .set("pid", Object::Number(std::process::id() as f64));
         }
         self.vm.set_global("process", process);
     }

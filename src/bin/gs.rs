@@ -90,17 +90,20 @@ fn run_embedded_app(args: Vec<String>) {
     } else {
         args
     };
-    let app_dir = match packagefile::extract_appended_package(
-        env::current_exe().unwrap_or_else(|_| PathBuf::from(".")),
-    ) {
+    let exe_path = env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
+    let app_dir = match packagefile::extract_appended_package(exe_path.clone()) {
         Ok(dir) => dir,
         Err(e) => {
             eprintln!("Error extracting embedded package: {e}");
             process::exit(1);
         }
     };
-    run_script(
+    // For packaged standalone executables, argv[0] is the exe the user invoked
+    // (not the temp-extracted entry), matching how shells/Node report argv0.
+    let argv0 = exe_path.to_str().map(|s| s.to_string()).unwrap_or_default();
+    run_script_with_argv0(
         default_entry_in(&app_dir),
+        argv0,
         app_args,
         true,
         None,
@@ -442,6 +445,28 @@ fn run_script(
     default_workers: Option<usize>,
     exec_mode: u8,
 ) {
+    // argv[0] is the script path itself (Node/Deno convention).
+    let argv0 = script.to_str().map(|s| s.to_string()).unwrap_or_default();
+    run_script_with_argv0(
+        script,
+        argv0,
+        script_args,
+        call_main,
+        timeout,
+        default_workers,
+        exec_mode,
+    );
+}
+
+fn run_script_with_argv0(
+    script: PathBuf,
+    argv0: String,
+    script_args: Vec<String>,
+    call_main: bool,
+    timeout: Option<Duration>,
+    default_workers: Option<usize>,
+    exec_mode: u8,
+) {
     // Expose --workers as an environment default the script can read via
     // @std/env (e.g. `app.listen(port, { workers: process.env.GTS_DEFAULT_WORKERS })`).
     // app.listen({ workers: N }) in the script itself always takes precedence.
@@ -455,10 +480,16 @@ fn run_script(
         .vm()
         .exec_mode
         .store(exec_mode, std::sync::atomic::Ordering::Relaxed);
+    // argv[0] = script path / exe path, then clean application args. This keeps
+    // `process.argv` and `require("@std/process").argv` aligned and lets scripts
+    // use `process.argv.slice(1)` for app args.
+    let mut argv = Vec::with_capacity(script_args.len() + 1);
+    argv.push(argv0);
+    argv.extend(script_args);
     match session.run_file_with_options(
         &script,
         RunOptions {
-            argv: script_args,
+            argv,
             call_main,
             timeout,
         },

@@ -30,8 +30,10 @@
 //!
 //! // Encode to JSON Lines
 //! let mut buf = Vec::new();
-//! let mut encoder = JsonlEncoder::new(&mut buf);
-//! encoder.encode(&frame).unwrap();
+//! {
+//!     let mut encoder = JsonlEncoder::new(&mut buf);
+//!     encoder.encode(&frame).unwrap();
+//! }
 //!
 //! // Decode from JSON Lines
 //! let mut decoder = JsonlDecoder::new(Cursor::new(buf));

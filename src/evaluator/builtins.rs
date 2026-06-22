@@ -229,7 +229,18 @@ fn json_object() -> Object {
         h.set(
             "stringify",
             native("JSON.stringify", |_ctx, args| match args.first() {
-                Some(o) => str_obj(json_stringify(o, 0)),
+                // JSON.stringify(value) -> compact (single-line), matching JS.
+                // JSON.stringify(value, null, space) -> pretty when space > 0.
+                Some(o) => {
+                    let space = match args.get(2) {
+                        Some(Object::Number(n)) if *n > 0.0 => Some(*n as usize),
+                        _ => None,
+                    };
+                    match space {
+                        Some(n) => str_obj(json_stringify_pretty(o, 0, n)),
+                        None => str_obj(json_stringify_compact(o)),
+                    }
+                }
                 None => str_obj("undefined"),
             }),
         );
@@ -253,7 +264,7 @@ fn json_object() -> Object {
     Object::Hash(hash)
 }
 
-fn json_stringify(obj: &Object, indent: usize) -> String {
+fn json_stringify_compact(obj: &Object) -> String {
     match obj {
         Object::Number(n) => format_number(*n),
         Object::String(s) => format!("{:?}", s.as_str()),
@@ -261,13 +272,43 @@ fn json_stringify(obj: &Object, indent: usize) -> String {
         Object::Null => "null".into(),
         Object::Undefined => "null".into(),
         Object::Array(a) => {
-            let pad = "  ".repeat(indent);
-            let inner = "  ".repeat(indent + 1);
+            let items: Vec<String> = a
+                .borrow()
+                .elements
+                .iter()
+                .map(|e| json_stringify_compact(e))
+                .collect();
+            format!("[{}]", items.join(","))
+        }
+        Object::Hash(h) => {
+            let items: Vec<String> = h
+                .borrow()
+                .entries
+                .iter()
+                .map(|(k, v)| format!("{:?}: {}", k, json_stringify_compact(v)))
+                .collect();
+            format!("{{{}}}", items.join(","))
+        }
+        _ => "null".into(),
+    }
+}
+
+fn json_stringify_pretty(obj: &Object, indent: usize, space: usize) -> String {
+    let pad_str = " ".repeat(space);
+    match obj {
+        Object::Number(n) => format_number(*n),
+        Object::String(s) => format!("{:?}", s.as_str()),
+        Object::Boolean(b) => b.to_string(),
+        Object::Null => "null".into(),
+        Object::Undefined => "null".into(),
+        Object::Array(a) => {
+            let pad = pad_str.repeat(indent);
+            let inner = pad_str.repeat(indent + 1);
             let items: Vec<String> = a
                 .borrow_mut()
                 .elements
                 .iter()
-                .map(|e| format!("{}{}", inner, json_stringify(e, indent + 1)))
+                .map(|e| format!("{}{}", inner, json_stringify_pretty(e, indent + 1, space)))
                 .collect();
             if items.is_empty() {
                 "[]".into()
@@ -276,13 +317,20 @@ fn json_stringify(obj: &Object, indent: usize) -> String {
             }
         }
         Object::Hash(h) => {
-            let pad = "  ".repeat(indent);
-            let inner = "  ".repeat(indent + 1);
+            let pad = pad_str.repeat(indent);
+            let inner = pad_str.repeat(indent + 1);
             let items: Vec<String> = h
                 .borrow_mut()
                 .entries
                 .iter()
-                .map(|(k, v)| format!("{}{:?}: {}", inner, k, json_stringify(v, indent + 1)))
+                .map(|(k, v)| {
+                    format!(
+                        "{}{:?}: {}",
+                        inner,
+                        k,
+                        json_stringify_pretty(v, indent + 1, space)
+                    )
+                })
                 .collect();
             if items.is_empty() {
                 "{}".into()
@@ -983,6 +1031,10 @@ fn attach_promise_statics(vm: &Rc<VirtualMachine>) {
                     return Object::Promise(promise);
                 }
                 let settled = Rc::new(std::sync::atomic::AtomicBool::new(false));
+                // Promise.race settles on the first item then breaks; the loop
+                // body always exits, which clippy flags as `never_loop`. That is
+                // the intended race semantics, so suppress the lint here.
+                #[allow(clippy::never_loop)]
                 for item in items {
                     match item {
                         Object::Promise(p) => {
@@ -1811,6 +1863,7 @@ pub fn string_method(name: &str) -> Option<BuiltinFn> {
         "startsWith" => Some(str_starts_with),
         "endsWith" => Some(str_ends_with),
         "indexOf" => Some(str_index_of),
+        "lastIndexOf" => Some(str_last_index_of),
         "slice" => Some(str_slice),
         "substring" => Some(str_substring),
         "charAt" => Some(str_char_at),
@@ -1941,6 +1994,19 @@ fn str_index_of(ctx: &mut CallContext, args: &[Object]) -> Object {
     if let Some(s) = active_string(ctx) {
         if let Some(Object::String(needle)) = args.first() {
             if let Some(idx) = s.find(needle.as_str()) {
+                return Object::Number(s[..idx].chars().count() as f64);
+            }
+        }
+    }
+    Object::Number(-1.0)
+}
+fn str_last_index_of(ctx: &mut CallContext, args: &[Object]) -> Object {
+    if let Some(s) = active_string(ctx) {
+        if let Some(Object::String(needle)) = args.first() {
+            if needle.is_empty() {
+                return Object::Number(s.chars().count() as f64);
+            }
+            if let Some(idx) = s.rfind(needle.as_str()) {
                 return Object::Number(s[..idx].chars().count() as f64);
             }
         }
