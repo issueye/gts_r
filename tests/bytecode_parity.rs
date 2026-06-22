@@ -236,6 +236,26 @@ fn stage_1_3_fixtures() -> Vec<Fixture> {
             dir: "class_field_update",
             expected: "class-field-update=12\n",
         },
+        Fixture {
+            dir: "try_catch",
+            expected: "try-catch=boom:finally\n",
+        },
+        Fixture {
+            dir: "try_finally_no_throw",
+            expected: "try-finally-no-throw=body:try:finally\n",
+        },
+        Fixture {
+            dir: "throw_catch_string",
+            expected: "throw-catch-string=boom\n",
+        },
+        Fixture {
+            dir: "throw_catch_error",
+            expected: "throw-catch-error=boom\n",
+        },
+        Fixture {
+            dir: "catch_finally_order",
+            expected: "catch-finally-order=start:catch:finally\n",
+        },
     ]
 }
 
