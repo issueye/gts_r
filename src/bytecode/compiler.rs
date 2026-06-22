@@ -148,6 +148,15 @@ fn compile_stmt(
             chunk.write_u16(name_idx, f.pos.clone());
             Ok(())
         }
+        Stmt::ClassDecl(c) => {
+            let class_idx = add_class_decl(chunk, c.clone());
+            chunk.write_op(Opcode::NewClass, c.pos.clone());
+            chunk.write_u16(class_idx, c.pos.clone());
+            let name_idx = chunk.add_constant(str_obj(c.name.clone()));
+            chunk.write_op(Opcode::StoreName, c.pos.clone());
+            chunk.write_u16(name_idx, c.pos.clone());
+            Ok(())
+        }
         Stmt::Return(r) => {
             if let Some(v) = &r.value {
                 compile_expr(v, chunk, resolutions)?;
@@ -924,7 +933,7 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk, resolutions: &ResolutionMap) -> 
 
         // —— function call (callee + args, then CALL) ——
         Expr::Call(c) => {
-            compile_expr(&c.callee, chunk, resolutions)?;
+            let has_this_receiver = compile_call_callee(&c.callee, chunk, resolutions)?;
             if c.args.iter().any(|arg| matches!(arg, Expr::Spread(_))) {
                 chunk.write_op(Opcode::NewArray, c.pos.clone());
                 chunk.write_u16(0, c.pos.clone());
@@ -948,7 +957,10 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk, resolutions: &ResolutionMap) -> 
             }
             let arg_count = c.args.len() as u16;
             chunk.write_op(Opcode::Call, c.pos.clone());
-            chunk.write_u16(arg_count, c.pos.clone());
+            chunk.write_u16(
+                encode_call_arg_count(arg_count, has_this_receiver, c.pos.clone())?,
+                c.pos.clone(),
+            );
             Ok(())
         }
         Expr::Member(m) => {
@@ -980,6 +992,16 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk, resolutions: &ResolutionMap) -> 
             }
             chunk.write_op(Opcode::New, n.pos.clone());
             chunk.write_u16(n.args.len() as u16, n.pos.clone());
+            Ok(())
+        }
+        Expr::This(t) => {
+            chunk.write_op(Opcode::LoadThis, t.pos.clone());
+            Ok(())
+        }
+        Expr::Class(c) => {
+            let class_idx = add_class_decl(chunk, (**c).clone());
+            chunk.write_op(Opcode::NewClass, c.pos.clone());
+            chunk.write_u16(class_idx, c.pos.clone());
             Ok(())
         }
         // —— function expression ——
@@ -1040,6 +1062,12 @@ fn emit_load_name(chunk: &mut Chunk, name: &str, pos: crate::ast::Position) {
     chunk.write_u16(idx, pos);
 }
 
+fn add_class_decl(chunk: &mut Chunk, decl: crate::ast::ClassDecl) -> u16 {
+    let idx = chunk.classes.len() as u16;
+    chunk.classes.push(Rc::new(decl));
+    idx
+}
+
 fn object_property_key(prop: &crate::ast::Property) -> Result<String, Object> {
     if prop.shorthand {
         if let Expr::Ident(i) = &prop.key {
@@ -1061,6 +1089,49 @@ fn object_property_key_expr(expr: &Expr) -> String {
         Expr::Number(n) => crate::object::format_number(n.value),
         _ => String::new(),
     }
+}
+
+fn compile_call_callee(
+    callee: &Expr,
+    chunk: &mut Chunk,
+    resolutions: &ResolutionMap,
+) -> Result<bool, Object> {
+    match callee {
+        Expr::Member(m) if !m.computed => {
+            compile_expr(&m.object, chunk, resolutions)?;
+            chunk.write_op(Opcode::Dup, m.pos.clone());
+            let name = object_property_key_expr(&m.property);
+            if name.is_empty() {
+                return Err(unsupported(m.pos.clone(), "member property key"));
+            }
+            let name_idx = chunk.add_constant(str_obj(name));
+            chunk.write_op(Opcode::GetProperty, m.pos.clone());
+            chunk.write_u16(name_idx, m.pos.clone());
+            Ok(true)
+        }
+        Expr::Index(i) => {
+            compile_expr(&i.left, chunk, resolutions)?;
+            chunk.write_op(Opcode::Dup, i.pos.clone());
+            compile_expr(&i.index, chunk, resolutions)?;
+            chunk.write_op(Opcode::GetIndex, i.pos.clone());
+            Ok(true)
+        }
+        _ => {
+            compile_expr(callee, chunk, resolutions)?;
+            Ok(false)
+        }
+    }
+}
+
+fn encode_call_arg_count(
+    arg_count: u16,
+    has_this_receiver: bool,
+    pos: crate::ast::Position,
+) -> Result<u16, Object> {
+    if arg_count > 0x7fff {
+        return Err(unsupported(pos, "call with more than 32767 arguments"));
+    }
+    Ok(arg_count | if has_this_receiver { 0x8000 } else { 0 })
 }
 
 /// Compile an assignment expression.

@@ -188,6 +188,18 @@ fn stage_1_3_fixtures() -> Vec<Fixture> {
             dir: "object_nested_access",
             expected: "object-nested-access=ada:12\n",
         },
+        Fixture {
+            dir: "object_method_call",
+            expected: "object-method-call=10:10\n",
+        },
+        Fixture {
+            dir: "class_basic",
+            expected: "class-basic=7:7\n",
+        },
+        Fixture {
+            dir: "class_method_this",
+            expected: "class-method-this=2:ab\n",
+        },
     ]
 }
 

@@ -7,7 +7,7 @@
 //! per opcode (see `Opcode`). Position tracking is line-anchored via
 //! `line_offsets` to keep memory low; `position_at(ip)` does the lookup.
 
-use crate::ast::Position;
+use crate::ast::{ClassDecl, Position};
 use crate::object::Object;
 use std::rc::Rc;
 
@@ -40,6 +40,10 @@ pub struct Chunk {
     /// Function prototypes referenced by `OpClosure(u16)`. Stored separately
     /// from `constants` because `FunctionProto` is not an `Object`.
     pub protos: Vec<Rc<FunctionProto>>,
+    /// Class declarations referenced by `OpNewClass(u16)`. Stage 5 bridges
+    /// to the shared evaluator class builder before method bodies are lowered
+    /// into bytecode prototypes.
+    pub classes: Vec<Rc<ClassDecl>>,
     /// Source position of the instruction that starts at each byte offset.
     /// Indexed by code offset; kept 1:1 with `code` for O(1) lookup. Memory is
     /// acceptable for stage 0; stage 8 may switch to run-length encoding.

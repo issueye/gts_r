@@ -14,7 +14,17 @@ pub fn call_closure(
     caller_env: &EnvRef,
     pos: Position,
 ) -> Result<Object, Object> {
-    call_closure_impl(c, caller_env, args, pos)
+    call_closure_with_this(c, args, caller_env, None, pos)
+}
+
+pub fn call_closure_with_this(
+    c: &crate::bytecode::closure::ClosureData,
+    args: &[Object],
+    caller_env: &EnvRef,
+    this: Option<Object>,
+    pos: Position,
+) -> Result<Object, Object> {
+    call_closure_impl(c, caller_env, args, this, pos)
 }
 
 /// Public entry for native -> VM callback (used by `apply_function` when it
@@ -25,7 +35,7 @@ pub fn call_closure_object(
     args: &[Object],
     pos: Position,
 ) -> Object {
-    match call_closure_impl(&c, caller_env, args, pos) {
+    match call_closure_impl(&c, caller_env, args, None, pos) {
         Ok(v) => v,
         Err(e) => e,
     }
@@ -35,6 +45,7 @@ fn call_closure_impl(
     c: &crate::bytecode::closure::ClosureData,
     caller_env: &EnvRef,
     args: &[Object],
+    this: Option<Object>,
     pos: Position,
 ) -> Result<Object, Object> {
     let proto = &c.proto;
@@ -46,7 +57,9 @@ fn call_closure_impl(
     }
 
     let scope = crate::object::Environment::child(&c.home_env);
-    if !proto.lexical_this {
+    if let Some(t) = this {
+        scope.borrow_mut().this = Some(t);
+    } else if !proto.lexical_this {
         scope.borrow_mut().this = None;
     }
 

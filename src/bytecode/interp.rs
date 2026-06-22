@@ -189,12 +189,15 @@ impl<'a> VmState<'a> {
                 self.stack.push(str_obj(v.inspect()));
             }
             Opcode::Call => {
-                let arg_count = self.chunk.read_u16(self.ip) as usize;
+                let encoded_arg_count = self.chunk.read_u16(self.ip);
+                let has_this_receiver = encoded_arg_count & 0x8000 != 0;
+                let arg_count = (encoded_arg_count & 0x7fff) as usize;
                 self.ip += 2;
                 let pos = self.chunk.position_at(self.ip - 3);
-                // Stack: [..., callee, arg1, ..., argN] (callee deepest).
+                // Stack: [..., receiver?, callee, arg1, ..., argN].
                 let stack_len = self.stack.len();
-                if stack_len < arg_count + 1 {
+                let needed = arg_count + 1 + usize::from(has_this_receiver);
+                if stack_len < needed {
                     return Err(self.stack_underflow(pos.clone()));
                 }
                 let args: Vec<Object> = self.stack.split_off(stack_len - arg_count);
@@ -202,7 +205,16 @@ impl<'a> VmState<'a> {
                     .stack
                     .pop()
                     .ok_or_else(|| self.stack_underflow(pos.clone()))?;
-                let result = self.call_value(callee, args, pos.clone())?;
+                let this = if has_this_receiver {
+                    Some(
+                        self.stack
+                            .pop()
+                            .ok_or_else(|| self.stack_underflow(pos.clone()))?,
+                    )
+                } else {
+                    None
+                };
+                let result = self.call_value(callee, args, this, pos.clone())?;
                 self.stack.push(result);
             }
             Opcode::PushArg => {
@@ -263,7 +275,7 @@ impl<'a> VmState<'a> {
                         ));
                     }
                 };
-                let result = self.call_value(callee, args, pos.clone())?;
+                let result = self.call_value(callee, args, None, pos.clone())?;
                 self.stack.push(result);
             }
             Opcode::New => {
@@ -281,6 +293,19 @@ impl<'a> VmState<'a> {
                     .ok_or_else(|| self.stack_underflow(pos.clone()))?;
                 let result = self.construct_value(callee, args, pos.clone())?;
                 self.stack.push(result);
+            }
+            Opcode::NewClass => {
+                let class_idx = self.chunk.read_u16(self.ip) as usize;
+                self.ip += 2;
+                let pos = self.chunk.position_at(self.ip - 3);
+                let Some(class_decl) = self.chunk.classes.get(class_idx) else {
+                    return Err(new_error(
+                        pos,
+                        format!("VMError: missing class declaration {}", class_idx),
+                    ));
+                };
+                let class = crate::evaluator::expressions::build_class(class_decl, &self.env)?;
+                self.stack.push(class);
             }
             Opcode::Closure => {
                 let proto_idx = self.chunk.read_u16(self.ip) as usize;
@@ -500,6 +525,10 @@ impl<'a> VmState<'a> {
                     ));
                 }
             }
+            Opcode::LoadThis => {
+                let value = self.env.borrow().this.clone().unwrap_or(Object::Undefined);
+                self.stack.push(value);
+            }
             Opcode::LoadUpvalue => {
                 let index = self.read_single_byte_operand("LOAD_UPVALUE")? as usize;
                 let pos = self.chunk.position_at(self.ip - 2);
@@ -715,12 +744,13 @@ impl<'a> VmState<'a> {
         &self,
         callee: Object,
         args: Vec<Object>,
+        this: Option<Object>,
         pos: Position,
     ) -> Result<Object, Object> {
         match callee {
             Object::Builtin(b) => {
                 let mut ctx = CallContext::new(&self.env, pos);
-                ctx.receiver = b.extra.clone();
+                ctx.receiver = b.extra.clone().or(this);
                 let result = (b.func)(&mut ctx, &args);
                 if result.is_runtime_error() {
                     Err(result)
@@ -728,13 +758,15 @@ impl<'a> VmState<'a> {
                     Ok(result)
                 }
             }
-            Object::Closure(c) => crate::bytecode::call::call_closure(&c, &args, &self.env, pos),
+            Object::Closure(c) => {
+                crate::bytecode::call::call_closure_with_this(&c, &args, &self.env, this, pos)
+            }
             // Tree-walker functions are still callable (e.g. globals installed
             // by register_globals that are Function values). Delegate to the
             // shared apply_function so semantics stay identical.
             other @ (Object::Function(_) | Object::Class(_)) => {
                 let r = crate::evaluator::expressions::apply_function(
-                    &other, &self.env, &args, None, pos,
+                    &other, &self.env, &args, this, pos,
                 );
                 if r.is_runtime_error() {
                     Err(r)
