@@ -209,8 +209,8 @@
   - 证据：`compile_match_body` 支持 `MatchBody::Expr` 与 `MatchBody::Block`，块体保留最后一条语句值作为 match 表达式结果；guard 已在 `compile_match` 中于 pattern 命中后求值，falsy 时跳到下一 arm；现有 `match_block_body` 覆盖块体结果 `match-block-body=hit:6`，新增 `match_guard` 覆盖 guard 选择 `match-guard=medium:6`；`cargo test --test bytecode_parity -- --nocapture` 1 passed
 - [ ] 7.4 类型注解：`type_check=true` 时插入运行期检查调用；默认 false 对齐树遍历
   - 证据：（待填）
-- [ ] 7.5 **补 fixture**（先树遍历下绿）：`match_or` `match_range` `match_guard`
-  - 证据：（待填）
+- [x] 7.5 **补 fixture**（先树遍历下绿）：`match_or` `match_range` `match_guard`
+  - 证据：新增 `tests/fixtures/parity/match_or/main.gs`、`match_range/main.gs`、`match_guard/main.gs`（另加 `match_ident_binding/main.gs` 覆盖 Ident pattern 绑定）；树遍历 CLI oracle 已确认输出 `match-or=primary`、`match-range=medium`、`match-guard=medium:6`、`match-ident-binding=id:gts`；四个 fixture 已纳入 `tests/bytecode_parity.rs` 并通过 `cargo test --test bytecode_parity -- --nocapture` 1 passed
 - [ ] 7.6 阶段 7 契约门（VM 单跑全绿）：
   - [ ] `match_basic` `match_string` `match_null` `match_boolean` `match_default_only` `match_block_body` `match_no_arm_catch`
   - [ ] 新补 `match_or` `match_range` `match_guard`
@@ -278,10 +278,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7.1-7.3 Match 主编译路径、5 种 Pattern、MatchBody 与 guard 已完成
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7.1-7.3 Match 主编译路径、5 种 Pattern、MatchBody 与 guard 已完成；阶段 7.5 fixture 已补齐
 **下一条 TODO**：继续阶段 7，推进 7.4 类型注解：`type_check=true` 时插入运行期检查调用；默认 false 对齐树遍历
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 7.2/7.3 已完成：新增 `match_or`、`match_range`、`match_guard`、`match_ident_binding` fixture，树遍历 oracle 与 bytecode parity 均通过；下一步进入类型注解 7.4）
+**最后更新**：2026-06-22（阶段 7.5 已完成：`match_or`、`match_range`、`match_guard` 与 Ident pattern 绑定 fixture 已补齐并纳入 bytecode parity；下一步进入类型注解 7.4）
 
 ---
 
