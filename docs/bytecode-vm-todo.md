@@ -218,7 +218,8 @@
   - 证据：`tests/bytecode_parity.rs` 已纳入阶段 7 Match 门全部 fixture：`match_basic`、`match_string`、`match_null`、`match_boolean`、`match_default_only`、`match_block_body`、`match_no_arm_catch`、`match_or`、`match_range`、`match_guard`；新增 `tests/fixtures/parity/typeof_values/main.gs` 覆盖 `10_typeof` 的核心类型输出路径（number/string/boolean/null/undefined/array/object/function/class 在当前 `gts_r` 树遍历语义下对齐）；`src/bytecode/opcode.rs`/`compiler.rs`/`interp.rs` 新增 `TypeOf` 指令并复用 `typeof_name`；`typeof_name` 补齐 `Object::Closure` 为 `function`；`cargo fmt --all --check` passed；`cargo test --lib bytecode` 100 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
 - [x] 7.7 覆盖度核对：`Match` + 5 Pattern + `MatchBody` + `guard` 打勾
   - 证据：覆盖清单已核对：`Expr::Match`→`compile_match`（fixture `match_basic`/`match_string`/`match_null`/`match_boolean`/`match_default_only`/`match_block_body`/`match_no_arm_catch`）；`Pattern::Literal`→`compile_pattern_test` 的 `Eq` 路径（`match_basic`、`match_string`、`match_null`、`match_boolean`）；`Pattern::Ident`→命中并绑定（`match_ident_binding`）；`Pattern::Wildcard`→无条件命中（`match_default_only`）；`Pattern::Or`→alternatives 任一命中（`match_or`）；`Pattern::Range`→`Ge` + `Le/Lt` 范围测试（`match_range`）；`MatchBody::Expr`→表达式 body（`match_basic` 等）；`MatchBody::Block`→块体最后值（`match_block_body`）；`guard`→命中后 guard falsy 跳下一 arm（`match_guard`）；`cargo fmt --all --check` passed；`cargo test --lib bytecode` 100 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
-- [ ] 7.8 提交 `[bytecode-7] Match 与类型`
+- [x] 7.8 提交 `[bytecode-7] Match 与类型`
+  - 证据：阶段 7 已拆分提交：`9ad4438 feat(bytecode): compile match expressions`（7.1）、`e5f6d41 test(bytecode): validate match patterns and guards`（7.2/7.3）、`93be280 docs(bytecode): close match fixture coverage`（7.5）、`950ced0 feat(bytecode): check typed declarations`（7.4）、`355c28b feat(bytecode): pass stage 7 contract gate`（7.6）、`fa18dba docs(bytecode): audit stage 7 match coverage`（7.7）；本条收口提交记录阶段 7 完成态；最终验证：`cargo fmt --all --check` passed；`cargo test --lib bytecode` 100 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
 
 ---
 
@@ -279,10 +280,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7.1-7.7 Match 主编译路径、5 种 Pattern、MatchBody、guard、类型注解、契约门与覆盖核对已完成；阶段 7.5 fixture 已补齐
-**下一条 TODO**：继续阶段 7，推进 7.8 提交 `[bytecode-7] Match 与类型`
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7 Match 全集与类型注解已完成并收口
+**下一条 TODO**：继续阶段 8，推进 8.1 `Import` 编译：调用 `vm.rs:30 ImporterFn`，导出值绑定到本地槽
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 7.7 已完成：Match + 5 Pattern + MatchBody + guard 覆盖清单已核对；下一步进入阶段 7 收口提交 7.8）
+**最后更新**：2026-06-22（阶段 7.8 已完成：Match 全集与类型注解阶段收口；下一步进入阶段 8 模块系统）
 
 ---
 
