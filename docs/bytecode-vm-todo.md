@@ -173,7 +173,8 @@
   - 证据：`tests/bytecode_parity.rs` 纳入 `arrays_objects`、`array_index_assignment`、`array_reduce`、`array_slice_join`、`array_shift_unshift`、`array_find_index`、`array_map_callback`、`object_computed_key`、`object_nested_access`、`object_method_call`、`class_basic`、`class_inheritance_method`、`class_inheritance_constructor`、`class_implicit_super`、`class_super_method_override`、`class_method_this`、`class_field_update`；`cargo test --test bytecode_parity -- --nocapture` 1 passed；`cargo test --lib bytecode` 86 passed
 - [x] 5.6 覆盖度核对：`Array/Object/Member/Index/New/Super/This/Assign/Spread/Class` 打勾
   - 证据：`src/bytecode/compiler.rs` 已覆盖 `Expr::Array`→`NewArray`（含数组 spread）、`Expr::Object`→`NewObject`（含对象 spread/computed key）、`Expr::Member`→`GetProperty/GetIndex`、`Expr::Index`→`GetIndex`、`Expr::New`→`New`、`Expr::This`→`LoadThis`、`Expr::Super`/`super.method`→`SuperMethod`、`Expr::Assign`→名字/成员/索引赋值、`Stmt::ClassDecl`/`Expr::Class`→`NewClass`，调用位置 `Expr::Spread`→`CallSpread`；`src/bytecode/interp.rs` 已实现 `Spread/New/NewClass/NewArray/NewObject/GetProperty/SetProperty/GetIndex/SetIndex/LoadThis/SuperMethod`；`tests/bytecode_parity.rs` 覆盖 `arrays_objects`、`array_index_assignment`、`array_reduce`、`array_slice_join`、`array_shift_unshift`、`array_find_index`、`function_spread_call`、`object_computed_key`、`object_nested_access`、`object_method_call`、`class_basic`、`class_inheritance_method`、`class_inheritance_constructor`、`class_implicit_super`、`class_super_method_override`、`class_method_this`、`class_field_update`；5.5 已复跑 `cargo test --test bytecode_parity -- --nocapture` 1 passed 与 `cargo test --lib bytecode` 86 passed
-- [ ] 5.7 提交 `[bytecode-5] 对象模型`
+- [x] 5.7 提交 `[bytecode-5] 对象模型`
+  - 证据：阶段 5 已拆分提交：`68902ab feat(bytecode): implement object and array opcodes`（5.1）、`7af8c3a feat(bytecode): bridge class construction and this binding`（5.2）、`11b5d6f feat(bytecode): lower class methods and super dispatch`（5.3）、`d438ea4 docs(bytecode): close computed key milestone`（5.4）、`2eef998 test(bytecode): close object model parity gate`（5.5）、`1aa4b20 docs(bytecode): audit object model coverage`（5.6）；本条收口提交记录阶段 5 完成态
 
 ---
 
@@ -276,10 +277,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5.1-5.6 对象模型 opcode、类/this/super、computed key、parity 门与覆盖度核对均已完成
-**下一条 TODO**：继续阶段 5，推进 5.7 提交 `[bytecode-5] 对象模型`
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口
+**下一条 TODO**：进入阶段 6，推进 6.1 `OpThrow` + `Chunk.protected_regions`
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 5.6 已完成：`Array/Object/Member/Index/New/Super/This/Assign/Spread/Class` 覆盖度核对通过；实现证据落在 `src/bytecode/compiler.rs`、`src/bytecode/interp.rs` 与 `tests/bytecode_parity.rs`；沿用 5.5 验证 `cargo test --lib bytecode` 86 passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed）
+**最后更新**：2026-06-22（阶段 5 已完成：对象/数组 opcode、类构建、`this`/`super`、computed key、对象模型 parity 门与覆盖度核对均已收口；最后验证沿用 5.5/5.6：`cargo test --lib bytecode` 86 passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed；下一步进入阶段 6 错误处理）
 
 ---
 
