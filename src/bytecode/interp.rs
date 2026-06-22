@@ -10,17 +10,30 @@
 //! contract (`1 + 2` → `3.0`) holds while still rejecting bad types.
 
 use crate::ast::Position;
-use crate::object::{new_error, EnvRef, Object};
+use crate::object::{new_error, str_obj, Builtin, CallContext, EnvRef, Object};
 
 use super::chunk::Chunk;
 use super::opcode::Opcode;
+use crate::evaluator::builtins::register_globals;
 use crate::evaluator::expressions::{apply_binary_op, apply_unary_op};
 
 /// Execute a compiled chunk under the given (root) environment. The
 /// environment holds the global name table; variable lookups route through it.
+///
+/// Globals (`println`, `print`, `console`, ...) are installed idempotently so
+/// that a freshly-built root environment (e.g. in unit tests) has the same
+/// builtins the CLI session provides. `register_globals` overwrites, so
+/// calling it twice is safe.
 pub fn interpret(chunk: &Chunk, env: &EnvRef) -> Object {
-    let mut vm = VmState::new(chunk, env.clone());
-    vm.run()
+    let vm = env.borrow().vm.clone();
+    // Install the standard globals (println, print, console, Math, ...) only
+    // if they aren't already present, so callers that supply their own (e.g. a
+    // test stubbing `println` to capture output) keep their overrides.
+    if !vm.has_global("println") {
+        register_globals(&vm);
+    }
+    let mut state = VmState::new(chunk, env.clone());
+    state.run()
 }
 
 struct VmState<'a> {
@@ -114,6 +127,11 @@ impl<'a> VmState<'a> {
                 let target = self.chunk.read_u32(self.ip) as usize;
                 self.ip = target;
             }
+            Opcode::Loop => {
+                // Backwards jump (loop back-edge). Same encoding as Jump.
+                let target = self.chunk.read_u32(self.ip) as usize;
+                self.ip = target;
+            }
             Opcode::JumpIfFalse => {
                 let target = self.chunk.read_u32(self.ip) as usize;
                 self.ip += 4;
@@ -136,6 +154,34 @@ impl<'a> VmState<'a> {
             Opcode::Return => {
                 let v = self.stack.pop().unwrap_or(Object::Undefined);
                 return Ok(Flow::Return(v));
+            }
+            Opcode::ToString => {
+                let pos = self.chunk.position_at(self.ip - 1);
+                let v = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                // Mirror the tree-walker's template interpolation (inspect()).
+                self.stack.push(str_obj(v.inspect()));
+            }
+            Opcode::Call => {
+                let arg_count = self.chunk.read_u16(self.ip) as usize;
+                self.ip += 2;
+                let pos = self.chunk.position_at(self.ip - 3);
+                // Stack: [..., callee, arg1, ..., argN] (callee deepest).
+                let stack_len = self.stack.len();
+                if stack_len < arg_count + 1 {
+                    return Err(self.stack_underflow(pos.clone()));
+                }
+                let args: Vec<Object> = self
+                    .stack
+                    .split_off(stack_len - arg_count);
+                let callee = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                let result = self.call_value(callee, args, pos.clone())?;
+                self.stack.push(result);
             }
 
             // —— variables (routed through the environment name table) ——
@@ -271,6 +317,34 @@ impl<'a> VmState<'a> {
 
     fn stack_underflow(&self, pos: Position) -> Object {
         new_error(pos, "VMError: stack underflow")
+    }
+
+    /// Invoke a callable value with the given arguments. Stage 2.1 supports
+    /// native builtins (the `println`/`print`/`console.*` family and any
+    /// globals installed by `register_globals`). User functions and class
+    /// construction arrive in stage 3/5.
+    fn call_value(
+        &self,
+        callee: Object,
+        args: Vec<Object>,
+        pos: Position,
+    ) -> Result<Object, Object> {
+        match callee {
+            Object::Builtin(b) => {
+                let mut ctx = CallContext::new(&self.env, pos);
+                ctx.receiver = b.extra.clone();
+                let result = (b.func)(&mut ctx, &args);
+                if result.is_runtime_error() {
+                    Err(result)
+                } else {
+                    Ok(result)
+                }
+            }
+            _ => Err(new_error(
+                pos,
+                format!("TypeError: {} is not callable", callee.type_tag()),
+            )),
+        }
     }
 }
 
@@ -512,7 +586,93 @@ mod tests {
         );
     }
 
-    // Note: interpolated templates (`${...}`) now work since variable lookups
-    // are supported, but template lowering needs the runtime interpolation path
-    // (stage 1.4 polish); the static template path is in place.
+    // —— control flow (stage 2.1) ——
+    // These tests store results in variables rather than relying on a block's
+    // value, mirroring how real fixtures work (assign then println).
+    #[test]
+    fn if_true_branch() {
+        let src = "let r = 0\nif (1 < 2) { r = 10 } else { r = 20 }\nr";
+        assert!(matches!(run_src(src), Object::Number(n) if n == 10.0));
+    }
+    #[test]
+    fn if_false_branch() {
+        let src = "let r = 0\nif (1 > 2) { r = 10 } else { r = 20 }\nr";
+        assert!(matches!(run_src(src), Object::Number(n) if n == 20.0));
+    }
+    #[test]
+    fn if_no_else_skips_body() {
+        // When false and no else, r stays at its initialized value.
+        let src = "let r = 99\nif (1 > 2) { r = 10 }\nr";
+        assert!(matches!(run_src(src), Object::Number(n) if n == 99.0));
+    }
+    #[test]
+    fn while_loop_basic() {
+        // sum 1..5 = 15
+        let src = "let i = 0\nlet s = 0\nwhile (i < 5) { i = i + 1\ns = s + i }\ns";
+        assert!(matches!(run_src(src), Object::Number(n) if n == 15.0));
+    }
+    #[test]
+    fn while_break() {
+        let src = "let i = 0\nwhile (true) { if (i >= 3) { break }\ni = i + 1 }\ni";
+        assert!(matches!(run_src(src), Object::Number(n) if n == 3.0));
+    }
+    #[test]
+    fn while_continue() {
+        // sum 1..5 skipping 3 => 1+2+4+5 = 12
+        let src = "let i = 0\nlet s = 0\nwhile (i < 5) { i = i + 1\nif (i === 3) { continue }\ns = s + i }\ns";
+        assert!(matches!(run_src(src), Object::Number(n) if n == 12.0));
+    }
+    #[test]
+    fn for_loop_basic() {
+        // sum 1..5 = 15
+        let src = "let s = 0\nfor (let i = 1; i <= 5; i = i + 1) { s = s + i }\ns";
+        assert!(matches!(run_src(src), Object::Number(n) if n == 15.0));
+    }
+    #[test]
+    fn for_loop_break() {
+        let src = "let s = 0\nfor (let i = 1; i <= 10; i = i + 1) { if (i === 4) { break }\ns = s + i }\ns";
+        // 1+2+3 = 6
+        assert!(matches!(run_src(src), Object::Number(n) if n == 6.0));
+    }
+    #[test]
+    fn nested_loops() {
+        // count inner iterations
+        let src = "let c = 0\nfor (let i = 0; i < 3; i = i + 1) { for (let j = 0; j < 3; j = j + 1) { c = c + 1 } }\nc";
+        assert!(matches!(run_src(src), Object::Number(n) if n == 9.0));
+    }
+
+    // —— template interpolation + println (stage 2.1c/d) ——
+    #[test]
+    fn template_interpolation_number() {
+        // `${1 + 2}` → "3"
+        assert!(matches!(run_src("`x${1 + 2}y`"), Object::String(s) if &*s == "x3y"));
+    }
+    #[test]
+    fn template_interpolation_variable() {
+        let src = "let n = 5\n`v=${n}`";
+        assert!(matches!(run_src(src), Object::String(s) if &*s == "v=5"));
+    }
+    #[test]
+    fn template_multiple_interpolations() {
+        let src = "let a = 1\nlet b = 2\n`${a}+${b}=${a + b}`";
+        assert!(matches!(run_src(src), Object::String(s) if &*s == "1+2=3"));
+    }
+    #[test]
+    fn println_bridges_to_global() {
+        // println returns undefined; we just assert no error and the program
+        // completes. (stdout is captured by the test runner; the contract is
+        // that the call dispatches without a TypeError.)
+        let r = run_src("println(\"hello\")");
+        assert!(matches!(r, Object::Undefined));
+    }
+    #[test]
+    fn println_with_template() {
+        // Mirrors the parity-fixture pattern: `println(`label=${value}`)`.
+        let r = run_src("let value = 42\nprintln(`v=${value}`)");
+        assert!(matches!(r, Object::Undefined));
+    }
+
+    // Parity fixtures (basic_expression, comparison_edges, truthy_logic,
+    // template_literals) use println + if + ${}; those paths are now wired.
+    // End-to-end fixture runs are validated via the parity test harness.
 }

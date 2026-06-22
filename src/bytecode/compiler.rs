@@ -13,7 +13,9 @@
 
 use crate::ast::{Expr, Program, Stmt};
 use crate::evaluator::string_lit::{eval_regexp_lit, eval_string_lit};
+use crate::lexer::Lexer;
 use crate::object::{bool_obj, new_error, num_obj, str_obj, Object};
+use crate::parser::Parser;
 
 use super::chunk::Chunk;
 use super::opcode::Opcode;
@@ -22,25 +24,333 @@ use super::opcode::Opcode;
 /// terminal RETURN, so the interpreter leaves the last value on the stack.
 pub fn compile(program: &Program) -> Result<Chunk, Object> {
     let mut chunk = Chunk::new();
-    for stmt in &program.body {
-        compile_stmt(stmt, &mut chunk)?;
+    let mut loops: Vec<LoopFrame> = Vec::new();
+    let n = program.body.len();
+    for (i, stmt) in program.body.iter().enumerate() {
+        compile_stmt(stmt, &mut chunk, &mut loops, i + 1 == n)?;
     }
     // Top-level RETURN: the program's result is whatever sits on the stack.
     chunk.write_op(Opcode::Return, program.pos.clone());
     Ok(chunk)
 }
 
-fn compile_stmt(stmt: &Stmt, chunk: &mut Chunk) -> Result<(), Object> {
+/// A loop being compiled: holds patch sites for `break` (jump to end) and
+/// `continue` (jump to the post-expression / condition re-test).
+#[derive(Default)]
+struct LoopFrame {
+    /// Byte offsets of pending `break` jumps (each is a JUMP placeholder).
+    breaks: Vec<u32>,
+    /// Byte offsets of pending `continue` jumps.
+    continues: Vec<u32>,
+}
+
+fn compile_stmt(
+    stmt: &Stmt,
+    chunk: &mut Chunk,
+    loops: &mut Vec<LoopFrame>,
+    keep_value: bool,
+) -> Result<(), Object> {
     match stmt {
         Stmt::Expr(e) => {
             compile_expr(&e.expr, chunk)?;
+            if !keep_value {
+                // Discard the expression value so it doesn't accumulate on the
+                // stack across iterations / statements. The top-level last
+                // statement keeps its value as the program result.
+                chunk.write_op(Opcode::Pop, e.pos.clone());
+            }
             Ok(())
         }
         Stmt::Let(s) => compile_decl(&s.name, s.value.as_ref(), false, s.pos.clone(), chunk),
         Stmt::Var(s) => compile_decl(&s.name, s.value.as_ref(), false, s.pos.clone(), chunk),
         Stmt::Const(s) => compile_decl(&s.name, s.value.as_ref(), true, s.pos.clone(), chunk),
+        Stmt::Block(b) => {
+            for s in &b.statements {
+                compile_stmt(s, chunk, loops, false)?;
+            }
+            Ok(())
+        }
+        Stmt::If(s) => compile_if(s, chunk, loops, keep_value),
+        Stmt::While(s) => compile_while(s, chunk, loops, keep_value),
+        Stmt::For(s) => compile_for(s, chunk, loops, keep_value),
+        Stmt::Break(s) => compile_break_continue(true, &s.label, s.pos.clone(), chunk, loops),
+        Stmt::Continue(s) => compile_break_continue(false, &s.label, s.pos.clone(), chunk, loops),
         _ => Err(unsupported(stmt.pos(), &format!("statement {:?}", stmt))),
     }
+}
+
+/// Compile `if (cond) { ... } else { ... }`.
+fn compile_if(
+    s: &crate::ast::IfStmt,
+    chunk: &mut Chunk,
+    loops: &mut Vec<LoopFrame>,
+    _keep_value: bool,
+) -> Result<(), Object> {
+    // cond ; JUMP_IF_FALSE else ; <then> ; JUMP end ; else: <else> ; end:
+    compile_expr(&s.cond, chunk)?;
+    let to_else = emit_jump_placeholder(chunk, Opcode::JumpIfFalse, s.pos.clone());
+    for stmt in &s.consequence.statements {
+        compile_stmt(stmt, chunk, loops, false)?;
+    }
+    let to_end = if s.alternative.is_some() {
+        Some(emit_jump_placeholder(chunk, Opcode::Jump, s.pos.clone()))
+    } else {
+        None
+    };
+    patch_jump_here(chunk, to_else);
+    if let Some(alt) = &s.alternative {
+        compile_stmt(alt, chunk, loops, false)?;
+    }
+    if let Some(end) = to_end {
+        patch_jump_here(chunk, end);
+    }
+    Ok(())
+}
+
+/// Compile `while (cond) { body }`.
+fn compile_while(
+    s: &crate::ast::WhileStmt,
+    chunk: &mut Chunk,
+    loops: &mut Vec<LoopFrame>,
+    _keep_value: bool,
+) -> Result<(), Object> {
+    // start: cond ; JUMP_IF_FALSE end ; <body> ; LOOP start ; end:
+    let start = chunk.code.len() as u32;
+    compile_expr(&s.cond, chunk)?;
+    let to_end = emit_jump_placeholder(chunk, Opcode::JumpIfFalse, s.pos.clone());
+    loops.push(LoopFrame::default());
+    for stmt in &s.body.statements {
+        compile_stmt(stmt, chunk, loops, false)?;
+    }
+    let frame = loops.pop().unwrap();
+    // Back-edge: LOOP to the condition test.
+    chunk.write_op(Opcode::Loop, s.pos.clone());
+    chunk.write_u32(start, s.pos.clone());
+    let end = chunk.code.len() as u32;
+    patch_jump_here(chunk, to_end);
+    // Patch break/continue jumps collected in the frame.
+    for b in &frame.breaks {
+        patch_jump_to(chunk, *b, end);
+    }
+    for c in &frame.continues {
+        patch_jump_to(chunk, *c, start);
+    }
+    Ok(())
+}
+
+/// Compile `for (init; cond; post) { body }`.
+fn compile_for(
+    s: &crate::ast::ForStmt,
+    chunk: &mut Chunk,
+    loops: &mut Vec<LoopFrame>,
+    _keep_value: bool,
+) -> Result<(), Object> {
+    // <init> ; start: <cond> ; JUMP_IF_FALSE end ; <body> ; post_start: <post> ; LOOP start ; end:
+    if let Some(init) = &s.init {
+        compile_stmt(init, chunk, loops, false)?;
+    }
+    let start = chunk.code.len() as u32;
+    let mut to_end: Option<u32> = None;
+    if let Some(cond) = &s.cond {
+        compile_expr(cond, chunk)?;
+        to_end = Some(emit_jump_placeholder(chunk, Opcode::JumpIfFalse, s.pos.clone()));
+    }
+    loops.push(LoopFrame::default());
+    for stmt in &s.body.statements {
+        compile_stmt(stmt, chunk, loops, false)?;
+    }
+    let frame = loops.pop().unwrap();
+    // post expression (continue targets here) — recorded AFTER the body so its
+    // offset is correct.
+    let post_start = chunk.code.len() as u32;
+    if let Some(post) = &s.post {
+        compile_expr(post, chunk)?;
+        chunk.write_op(Opcode::Pop, s.pos.clone()); // discard post value
+    }
+    chunk.write_op(Opcode::Loop, s.pos.clone());
+    chunk.write_u32(start, s.pos.clone());
+    let end = chunk.code.len() as u32;
+    if let Some(end_patch) = to_end {
+        patch_jump_here(chunk, end_patch);
+    }
+    for b in &frame.breaks {
+        patch_jump_to(chunk, *b, end);
+    }
+    for c in &frame.continues {
+        patch_jump_to(chunk, *c, post_start);
+    }
+    Ok(())
+}
+
+/// Compile `break` (is_break=true) or `continue`. Records a pending JUMP in
+/// the current loop frame to be patched when the loop's end / continue-target
+/// is known. Labeled break/continue is stage 2 polish (defers to plain).
+fn compile_break_continue(
+    is_break: bool,
+    _label: &str,
+    pos: crate::ast::Position,
+    chunk: &mut Chunk,
+    loops: &mut Vec<LoopFrame>,
+) -> Result<(), Object> {
+    let frame = match loops.last_mut() {
+        Some(f) => f,
+        None => {
+            return Err(unsupported(
+                pos,
+                if is_break { "break outside loop" } else { "continue outside loop" },
+            ));
+        }
+    };
+    let patch = emit_jump_placeholder(chunk, Opcode::Jump, pos);
+    if is_break {
+        frame.breaks.push(patch);
+    } else {
+        frame.continues.push(patch);
+    }
+    Ok(())
+}
+
+/// Compile an interpolated template literal into a string concatenation.
+///
+/// Each `${expr}` segment is re-parsed as a sub-expression (matching the
+/// tree-walker's `eval_template_expression`), evaluated, and converted to its
+/// string form via TO_STRING. Literal text segments are CONST strings. All
+/// parts are joined left-to-right with `+` (string concat).
+fn compile_template_interpolated(
+    t: &crate::ast::TemplateLit,
+    chunk: &mut Chunk,
+) -> Result<(), Object> {
+    let lit = &t.literal;
+    if lit.len() < 2 || !lit.starts_with('`') {
+        let value = crate::evaluator::string_lit::eval_template_static(t);
+        let idx = chunk.add_constant(value);
+        emit_const(chunk, idx, t.pos.clone());
+        return Ok(());
+    }
+    let mut inner = &lit[1..];
+    if inner.ends_with('`') {
+        inner = &inner[..inner.len() - 1];
+    }
+    let bytes = inner.as_bytes();
+    let mut segments_emitted = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if i + 1 < bytes.len() && bytes[i] == b'$' && bytes[i + 1] == b'{' {
+            let end = match find_template_expr_end(inner, i + 2) {
+                Some(end) => end,
+                None => {
+                    return Err(unsupported(
+                        t.pos.clone(),
+                        "unterminated template expression",
+                    ));
+                }
+            };
+            let expr_str = inner[i + 2..end].trim();
+            if !expr_str.is_empty() {
+                // Re-parse the sub-expression at compile time so the emitted
+                // bytecode reflects its structure (not a runtime re-parse).
+                let sub_expr = parse_template_expr(expr_str, t.pos.clone())?;
+                compile_expr(&sub_expr, chunk)?;
+                chunk.write_op(Opcode::ToString, t.pos.clone());
+                if segments_emitted > 0 {
+                    chunk.write_op(Opcode::Concat, t.pos.clone());
+                }
+                segments_emitted += 1;
+            }
+            i = end + 1;
+            continue;
+        }
+        // Collect a run of literal chars up to the next `${`.
+        let start = i;
+        while i < bytes.len()
+            && !(i + 1 < bytes.len() && bytes[i] == b'$' && bytes[i + 1] == b'{')
+        {
+            i += 1;
+        }
+        let text = crate::evaluator::string_lit::unescape_string(&inner[start..i]);
+        let idx = chunk.add_constant(str_obj(text));
+        emit_const(chunk, idx, t.pos.clone());
+        if segments_emitted > 0 {
+            chunk.write_op(Opcode::Concat, t.pos.clone());
+        }
+        segments_emitted += 1;
+    }
+    // Empty template → empty string.
+    if segments_emitted == 0 {
+        let idx = chunk.add_constant(str_obj(""));
+        emit_const(chunk, idx, t.pos.clone());
+    }
+    Ok(())
+}
+
+/// Re-parse a template `${...}` sub-expression string into an AST Expr, so the
+/// compiler can emit bytecode for it (rather than deferring to a runtime
+/// re-parse). Mirrors the tree-walker's `eval_template_expression` parse step.
+fn parse_template_expr(src: &str, pos: crate::ast::Position) -> Result<Expr, Object> {
+    let wrap = format!("let __gts_tpl = {};", src);
+    let lex = Lexer::new(&wrap);
+    let mut parser = Parser::new(lex, pos.file.as_ref());
+    let prog = parser.parse_program();
+    if !parser.errors().is_empty() || !prog.errors.is_empty() {
+        return Err(unsupported(pos, "template expression parse error"));
+    }
+    // Extract the initializer expression from `let __gts_tpl = <expr>;`.
+    for stmt in &prog.body {
+        if let Stmt::Let(l) = stmt {
+            if let Some(v) = &l.value {
+                return Ok(v.clone());
+            }
+        }
+    }
+    Err(unsupported(pos, "template expression parse error"))
+}
+
+/// Find the matching `}` for a `${...}` template expression, accounting for
+/// nested braces and quoted strings. Mirrors the tree-walker's helper.
+fn find_template_expr_end(s: &str, start: usize) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut depth = 0i32;
+    let mut quote: u8 = 0;
+    let mut escape = false;
+    let mut i = start;
+    while i < bytes.len() {
+        let ch = bytes[i];
+        if quote != 0 {
+            if escape {
+                escape = false;
+            } else if ch == b'\\' {
+                escape = true;
+            } else if ch == quote {
+                quote = 0;
+            }
+            i += 1;
+            continue;
+        }
+        match ch {
+            b'"' | b'\'' => quote = ch,
+            b'{' => depth += 1,
+            b'}' => {
+                if depth == 0 {
+                    return Some(i);
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Patch a jump placeholder to an explicit target offset (not necessarily
+/// "here").
+fn patch_jump_to(chunk: &mut Chunk, operand_ip: u32, target: u32) {
+    let ip = operand_ip as usize;
+    let bytes = target.to_be_bytes();
+    chunk.code[ip] = bytes[0];
+    chunk.code[ip + 1] = bytes[1];
+    chunk.code[ip + 2] = bytes[2];
+    chunk.code[ip + 3] = bytes[3];
 }
 
 /// Compile a `let`/`var`/`const` declaration.
@@ -128,21 +438,18 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
             Ok(())
         }
         Expr::Template(t) => {
-            // Templates with `${...}` interpolation need runtime evaluation
-            // (variable lookup), which arrives in stage 1.3. Static templates
-            // (no interpolation) reduce to a plain string at compile time.
-            if t.literal.contains("${") {
-                return Err(unsupported(
-                    t.pos.clone(),
-                    "template interpolation (stage 1.3, after variables)",
-                ));
+            // Templates with `${...}` interpolation are lowered to a series of
+            // string concatenations: each literal text segment is a CONST
+            // string, each `${expr}` segment is the expression followed by
+            // TO_STRING. All parts are joined with `+` (string concat).
+            if !t.literal.contains("${") {
+                // Static template (no interpolation): reduce at compile time.
+                let value = crate::evaluator::string_lit::eval_template_static(t);
+                let idx = chunk.add_constant(value);
+                emit_const(chunk, idx, t.pos.clone());
+                return Ok(());
             }
-            // Reuse the tree-walker's evaluator for the static case so escape
-            // handling stays identical.
-            let value = crate::evaluator::string_lit::eval_template_static(t);
-            let idx = chunk.add_constant(value);
-            emit_const(chunk, idx, t.pos.clone());
-            Ok(())
+            compile_template_interpolated(t, chunk)
         }
 
         // —— prefix ——
@@ -220,6 +527,20 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
             }
         }
 
+        // —— function call (callee + args, then CALL) ——
+        Expr::Call(c) => {
+            // Stage 2.1 supports calling builtins (println, etc.) and any
+            // callable reachable by name. Compile callee, then each arg, then
+            // a CALL with the arg count.
+            compile_expr(&c.callee, chunk)?;
+            for arg in &c.args {
+                compile_expr(arg, chunk)?;
+            }
+            let arg_count = c.args.len() as u16;
+            chunk.write_op(Opcode::Call, c.pos.clone());
+            chunk.write_u16(arg_count, c.pos.clone());
+            Ok(())
+        }
         _ => Err(unsupported(expr.pos(), &format!("expression {:?}", expr))),
     }
 }

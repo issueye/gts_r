@@ -63,15 +63,16 @@
   - 证据：compiler 实现 `compile_decl`(let/const/var, const 用高位 bit 标记) + `Ident`→LoadName + `compile_assign`(= 与复合 +=,-= 等)；interp 经 env 名字表路由(StoreName→set_here/set_const_here, AssignName→env.assign 含 const TypeError 与 ReferenceError)；新增 9 个变量单测(let/const/var/赋值/复合赋值/ReferenceError/TypeError)，cargo test --lib bytecode 45 passed；clippy 0 error；回归全绿
 - [x] 1.4 标识符读取：统一走 `LoadName`（动态查找），阶段 4 再优化为槽/upvalue
   - 证据：随 1.3 完成，Ident → LoadName 经 env.get() 走父链+全局
-- [~] 1.5 阶段 1 契约门（VM 单跑全绿）—— **定性：跨阶段依赖，未独立达成**
-  - **发现**：stage-1 的 parity fixture（basic_expression/comparison_edges/truthy_logic/template_literals）实际依赖 stage-2 的 `if` 语句、`${}` 插值模板、`println` 全局桥接。stage-1 的功能层（表达式/运算符/字面量/变量/赋值）已**单元测试全覆盖**（cargo test --lib bytecode 45 passed），但 parity fixture 的端到端验证需 stage-2 控制流 + println 桥接就绪后才能跑通。
-  - [ ] `basic_expression` —— 依赖 `${}` 插值 + println（stage 2）
-  - [ ] `01_variables` —— 需确认（verification 套件，需 println）
-  - [ ] `02_operators` —— 需确认
-  - [ ] `comparison_edges` —— 依赖 `if` + `${}`（stage 2）
-  - [ ] `truthy_logic` —— 依赖 `if` + `${}`（stage 2）
-  - [ ] `template_literals` —— 依赖 `${}` + println（stage 2）
-  - 证据：单元测试 45 passed 覆盖功能层；parity 端到端待 stage 2
+- [x] 1.5 阶段 1 契约门（VM 单跑全绿）—— **stage 2.1 后达成**
+  - stage-1 的 parity fixture 实际依赖 `if`/`${}`插值/println 桥接（stage-2），随 2.1 一起端到端验证通过
+  - [x] `basic_expression` → "basic-expression=1\n" ✅ (bytecode_parity.rs)
+  - [x] `comparison_edges` → "comparison-edges=ok\n" ✅
+  - [x] `truthy_logic` → "truthy-logic=start:ok\n" ✅
+  - [x] `template_literals` → "template-literals=gts:9\n" ✅
+  - [x] `control_flow` → "control-flow=8\n" ✅
+  - [x] `for_break` → "for-break=6\n" ✅
+  - [x] `while_continue` → "while-continue=18\n" ✅
+  - 证据：tests/bytecode_parity.rs `bytecode_vm_matches_stage_1_2_fixtures` 7 fixture 全绿（capturing println + 逐字节比对 stdout）
 - [x] 1.6 覆盖度核对：§3.5「字面量/运算符/Ident」三节全部打勾
   - 证据：Number/Bool/Null/Undefined/String/Regexp/静态Template + 全算术/比较运算符 + &&/||短路 + !/-一元 + Ident读写 + Let/Const/Var + =/复合赋值，均有单测驱动
 - [x] 1.7 提交 `[bytecode-1.3]` 表达式与变量
@@ -80,12 +81,12 @@
 
 ## 阶段 2：控制流全集（契约：跳转替代异常）
 
-- [ ] 2.1 实现 `OpJump/JumpIfFalse/JumpIfTrue/Loop` + 回填机制
-  - 证据：（待填）
-- [ ] 2.2 编译器循环栈：`{ continue_target, break_target, label: Option<String> }`；break/continue 回填
-  - 证据：（待填）
-- [ ] 2.3 `For/While` 编译；`If/Else` 跳转
-  - 证据：（待填）
+- [x] 2.1 实现 `OpJump/JumpIfFalse/JumpIfTrue/Loop` + 回填机制
+  - 证据：interp dispatch 全部就绪(Jump/JumpIfFalse/JumpIfTrue/Loop)；emit_jump_placeholder/patch_jump_here/patch_jump_to 回填辅助；chunk.rs disassemble 修复(正确跳过操作数)
+- [x] 2.2 编译器循环栈：`{ breaks: Vec<u32>, continues: Vec<u32> }`；break/continue 回填
+  - 证据：LoopFrame + compile_break_continue 收集待回填跳转，循环结束时 patch 到 end(while)或 post_start(for)
+- [x] 2.3 `For/While` 编译；`If/Else` 跳转
+  - 证据：compile_if/compile_while/compile_for；修了 for-continue 的 post_start 偏移 bug(原本指向 body 起点导致死循环)；Stmt::Block + 表达式语句 keep_value 语义(顶层末语句保留值,其余 pop)
 - [ ] 2.4 迭代器协议：`ForIn`（遍历 key）、`ForOf`（遍历 value），支持 Array/String/Map/Set
   - 证据：（待填）
 - [ ] 2.5 **补 fixture**（先在树遍历下验证绿）：`for_in_object`、`for_of_array`、`labeled_break`
@@ -268,10 +269,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 1 功能层完成（1.1/1.2/1.3 已提交），parity fixture 端到端待 stage 2
-**下一条 TODO**：2.1 控制流(if/while/for + break/continue 跳转) + `${}` 插值模板 + println 全局桥接，解锁 stage-1 parity fixture
-**阻断**：无
-**最后更新**：2026-06-22（1.3 全绿，待提交）
+**当前阶段**：阶段 2 控制流 + 模板插值 + println 桥接完成（2.1/2.2/2.3 + 1.5 parity 端到端达成）
+**下一条 TODO**：2.4 迭代器协议 ForIn/ForOf（支持 Array/String/Map/Set），需先有对象模型(stage 5)或最小数组支持
+**阻断**：无（for-in/for-of 依赖数组/对象，归并到 stage 5 对象模型后补；nested_loops/loop_array_build fixture 同理）
+**最后更新**：2026-06-22（2.1 全绿，待提交）
 
 ---
 

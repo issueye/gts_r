@@ -107,6 +107,9 @@ pub enum Opcode {
     // —— errors / async ——
     Throw = 90,
     Await = 91,
+    /// Pop a value, convert to its string representation (Object::inspect),
+    /// push the resulting string. Used for template-literal interpolation.
+    ToString = 92,
 }
 
 impl Opcode {
@@ -167,6 +170,7 @@ impl Opcode {
             79 => Opcode::New,
             90 => Opcode::Throw,
             91 => Opcode::Await,
+            92 => Opcode::ToString,
             _ => return None,
         })
     }
@@ -225,6 +229,7 @@ impl Opcode {
             Opcode::New => "NEW",
             Opcode::Throw => "THROW",
             Opcode::Await => "AWAIT",
+            Opcode::ToString => "TO_STRING",
         }
     }
 }

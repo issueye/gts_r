@@ -132,18 +132,40 @@ impl Chunk {
             let b = self.code[ip];
             let op = Opcode::from_byte(b);
             let pos = self.position_at(ip);
-            match op {
-                Some(op) => out.push_str(&format!(
-                    "  {:4} {:<16} ; {}:{}:{}\n",
-                    ip,
-                    op.name(),
-                    pos.file,
-                    pos.line,
-                    pos.col
-                )),
-                None => out.push_str(&format!("  {:4} <bad opcode 0x{:02x}>\n", ip, b)),
-            }
+            let start = ip;
             ip += 1;
+            match op {
+                Some(op) => {
+                    // Read the operand (if any) so we advance past its bytes.
+                    let operand_str = match op {
+                        Opcode::Const | Opcode::LoadName | Opcode::StoreName
+                        | Opcode::AssignName | Opcode::GetProperty | Opcode::SetProperty
+                        | Opcode::DefineMethod | Opcode::NewClass | Opcode::SuperMethod
+                        | Opcode::NewArray | Opcode::New | Opcode::Call => {
+                            let v = self.read_u16(ip);
+                            ip += 2;
+                            format!(" {}", v)
+                        }
+                        Opcode::Jump | Opcode::JumpIfFalse | Opcode::JumpIfTrue
+                        | Opcode::Loop => {
+                            let v = self.read_u32(ip);
+                            ip += 4;
+                            format!(" ->{}", v)
+                        }
+                        _ => String::new(),
+                    };
+                    out.push_str(&format!(
+                        "  {:4} {:<16}{} ; {}:{}:{}\n",
+                        start,
+                        op.name(),
+                        operand_str,
+                        pos.file,
+                        pos.line,
+                        pos.col
+                    ));
+                }
+                None => out.push_str(&format!("  {:4} <bad opcode 0x{:02x}>\n", start, b)),
+            }
         }
         out
     }
