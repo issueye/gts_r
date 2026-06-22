@@ -265,11 +265,11 @@
 ## 阶段 10：全量验收 + 默认切换
 
 - [x] 10.1 **REQ-1**：`cargo test --test bytecode_parity` 全部 fixture（51+补的）VM 单跑全绿
-  - 证据：`tests/bytecode_parity.rs` 改为通过 `Session` 的 `EXEC_MODE_BYTECODE` 运行 parity fixture，并用 `assert_all_fixture_dirs_are_covered` 断言清单覆盖 `tests/fixtures/parity` 下全部 67 个目录；覆盖普通脚本、require/import/export 模块 fixture 与 `project.toml` 入口 `project_entry`；验证：`cargo fmt --all --check` passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed（`bytecode_vm_matches_all_parity_fixtures`）
+  - 证据：`tests/bytecode_parity.rs` 改为通过 `Session` 的 `EXEC_MODE_BYTECODE` 运行 parity fixture，并用 `assert_all_fixture_dirs_are_covered` 断言清单覆盖 `tests/fixtures/parity` 下全部 71 个目录；覆盖普通脚本、require/import/export 模块 fixture 与 `project.toml` 入口 `project_entry`；验证：`cargo fmt --all --check` passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed（`bytecode_vm_matches_all_parity_fixtures`）
 - [x] 10.2 **REQ-2**：`gts\verification\**` 12 套件在 `--exec-mode=bytecode` 下全绿
   - 证据：新增 `tests/bytecode_verification.rs::bytecode_vm_runs_verification_basics_and_async`，定位同级仓库 `gts\verification`，为每个脚本创建独立 `Session` 并设置 `EXEC_MODE_BYTECODE`，覆盖 `01_basics/01_variables.gs`、`02_operators.gs`、`03_control_flow.gs`、`04_functions.gs`、`05_closures.gs`、`06_arrays.gs`、`07_objects.gs`、`08_classes.gs`、`09_errors.gs`、`10_typeof.gs`、`02_async/11_promises.gs`、`12_async_await.gs` 12 个验证脚本；为通过该门补齐字节码 bitwise 运算、`instanceof`/`in`、对象 `hasOwnProperty`、`new Promise` 所需 callable hash/function 构造路径，以及 `new Error(...)` 非 runtime Error 值语义；验证：`cargo fmt --all --check` passed、`cargo test --lib bytecode` passed、`cargo test --test bytecode_async -- --nocapture` passed、`cargo test --test bytecode_verification -- --nocapture` 1 passed、`cargo test --test bytecode_parity -- --nocapture` passed
-- [ ] 10.3 **REQ-3**：§3.5 编译器覆盖度表 100%，无未覆盖节点
-  - 证据：（待填最终覆盖度表）
+- [x] 10.3 **REQ-3**：§3.5 编译器覆盖度表 100%，无未覆盖节点
+  - 证据：`src/bytecode/compiler.rs` 的 `compile_stmt` 已改为穷尽匹配，覆盖 `Stmt::{Let,Const,Var,FuncDecl,ClassDecl,Block,If,While,For,ForIn,ForOf,Return,Break,Continue,Throw,Try,Expr,Labeled,Import,Export}`；`compile_expr` 已覆盖当前 27 个 `Expr` 变体：`Ident/Number/String/Template/Regexp/Bool/Null/Undefined/This/Super/Array/Object/Prefix/Infix/Ternary/Assign/Call/Member/Index/Optional/Func/Arrow/New/Await/Spread/Match/Class`，其中 bare `Spread` 明确拒绝，数组/对象/调用上下文 spread 继续走 `Spread/CallSpread`；`Match` 覆盖 `Pattern::{Literal,Ident,Wildcard,Or,Range}`、`MatchBody::{Expr,Block}` 与 guard；补齐 `Opcode::Identity` 以对齐前缀 `+`；新增/纳入 parity fixtures：`ternary_expression`、`optional_chain`、`regexp_literal`、`class_expression`；补 `lexer::lexer::tests::lexes_optional_chain_dot_separately_from_ellipsis` 防止 `?.` 被误词法化为 `Ellipsis`，补 `bytecode::compiler` 三元/可选链/前缀 `+` opcode 单测；验证：`cargo fmt --all --check` passed、`cargo test --lib bytecode::compiler -- --nocapture` 15 passed、`cargo test --lib lexes_optional_chain_dot_separately_from_ellipsis -- --nocapture` 1 passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed
 - [ ] 10.4 性能基准：`bench/scripts/bench_server.gs` 在 fib/字符串拼接/Promise 创建三类下 VM 不劣于树遍历
   - 证据：（待填基准数据）
 - [ ] 10.5 `Session::new()` 默认 `ExecMode::Bytecode`；保留 `--exec-mode=tree`
@@ -285,9 +285,9 @@
 > **续工时从这里开始。**
 
 **当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7 Match 全集与类型注解已完成并收口；阶段 8 模块系统全集已完成并收口；阶段 9 异步全集已完成并收口
-**下一条 TODO**：继续阶段 10，推进 10.3 §3.5 编译器覆盖度表 100%，无未覆盖节点
+**下一条 TODO**：继续阶段 10，推进 10.4 性能基准：`bench/scripts/bench_server.gs` 在 fib/字符串拼接/Promise 创建三类下 VM 不劣于树遍历
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 10.2 已完成：`gts\verification\**` 12 个基础/异步验证脚本均可在 bytecode 模式下通过；下一步推进编译器覆盖度表 100% 核对）
+**最后更新**：2026-06-22（阶段 10.3 已完成：§3.5 编译器覆盖度表 100%，语句/表达式/Match 模式均有穷尽或显式上下文覆盖；下一步推进 10.4 性能基准）
 
 ---
 

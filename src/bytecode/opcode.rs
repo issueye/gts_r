@@ -53,6 +53,7 @@ pub enum Opcode {
     Shl = 35,
     Shr = 36,
     UShr = 37,
+    Identity = 38,
 
     // —— variables ——
     /// Operand: u16 name-table index.
@@ -180,6 +181,7 @@ impl Opcode {
             35 => Opcode::Shl,
             36 => Opcode::Shr,
             37 => Opcode::UShr,
+            38 => Opcode::Identity,
             40 => Opcode::LoadGlobal,
             41 => Opcode::StoreGlobal,
             42 => Opcode::LoadLocal,
@@ -258,6 +260,7 @@ impl Opcode {
             Opcode::Shl => "SHL",
             Opcode::Shr => "SHR",
             Opcode::UShr => "USHR",
+            Opcode::Identity => "IDENTITY",
             Opcode::LoadGlobal => "LOAD_GLOBAL",
             Opcode::StoreGlobal => "STORE_GLOBAL",
             Opcode::LoadLocal => "LOAD_LOCAL",

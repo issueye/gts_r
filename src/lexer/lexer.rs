@@ -153,13 +153,8 @@ impl Lexer {
                 }
                 '.' => {
                     self.advance();
-                    if self.peek() == '.' {
-                        self.advance();
-                        TokenKind::Ellipsis
-                    } else {
-                        self.advance();
-                        TokenKind::QmDot
-                    }
+                    self.advance();
+                    TokenKind::QmDot
                 }
                 _ => {
                     self.advance();
@@ -746,5 +741,21 @@ impl Lexer {
             }
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lexes_optional_chain_dot_separately_from_ellipsis() {
+        let mut lexer = Lexer::new("obj?.name ...rest");
+
+        assert_eq!(lexer.next_token().kind, TokenKind::Ident);
+        assert_eq!(lexer.next_token().kind, TokenKind::QmDot);
+        assert_eq!(lexer.next_token().kind, TokenKind::Ident);
+        assert_eq!(lexer.next_token().kind, TokenKind::Ellipsis);
+        assert_eq!(lexer.next_token().kind, TokenKind::Ident);
     }
 }

@@ -178,7 +178,6 @@ fn compile_stmt(
             chunk.write_op(Opcode::Return, r.pos.clone());
             Ok(())
         }
-        _ => Err(unsupported(stmt.pos(), &format!("statement {:?}", stmt))),
     }
 }
 
@@ -1146,7 +1145,8 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk, resolutions: &ResolutionMap) -> 
                 "-" => Opcode::Neg,
                 "~" => Opcode::BitNot,
                 "typeof" => Opcode::TypeOf,
-                "+" | "void" => {
+                "+" => Opcode::Identity,
+                "void" => {
                     return Err(unsupported(
                         p.pos.clone(),
                         &format!("prefix operator `{}`", p.op),
@@ -1197,6 +1197,7 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk, resolutions: &ResolutionMap) -> 
                 }
             }
         }
+        Expr::Ternary(t) => compile_ternary(t, chunk, resolutions),
 
         // —— function call (callee + args, then CALL) ——
         Expr::Call(c) => {
@@ -1217,35 +1218,15 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk, resolutions: &ResolutionMap) -> 
                 return Ok(());
             }
             let has_this_receiver = compile_call_callee(&c.callee, chunk, resolutions)?;
-            if c.args.iter().any(|arg| matches!(arg, Expr::Spread(_))) {
-                chunk.write_op(Opcode::NewArray, c.pos.clone());
-                chunk.write_u16(0, c.pos.clone());
-                for arg in &c.args {
-                    match arg {
-                        Expr::Spread(sp) => {
-                            compile_expr(&sp.value, chunk, resolutions)?;
-                            chunk.write_op(Opcode::Spread, sp.pos.clone());
-                        }
-                        _ => {
-                            compile_expr(arg, chunk, resolutions)?;
-                            chunk.write_op(Opcode::PushArg, arg.pos());
-                        }
-                    }
-                }
-                chunk.write_op(Opcode::CallSpread, c.pos.clone());
-                return Ok(());
-            }
-            for arg in &c.args {
-                compile_expr(arg, chunk, resolutions)?;
-            }
-            let arg_count = c.args.len() as u16;
-            chunk.write_op(Opcode::Call, c.pos.clone());
-            chunk.write_u16(
-                encode_call_arg_count(arg_count, has_this_receiver, c.pos.clone())?,
+            compile_call_args(
+                &c.args,
+                has_this_receiver,
                 c.pos.clone(),
-            );
-            Ok(())
+                chunk,
+                resolutions,
+            )
         }
+        Expr::Optional(o) => compile_optional(o, chunk, resolutions),
         Expr::Member(m) => {
             compile_expr(&m.object, chunk, resolutions)?;
             if m.computed {
@@ -1346,8 +1327,115 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk, resolutions: &ResolutionMap) -> 
             chunk.write_u16(idx, a.pos.clone());
             Ok(())
         }
-        _ => Err(unsupported(expr.pos(), &format!("expression {:?}", expr))),
+        Expr::Spread(sp) => Err(unsupported(
+            sp.pos.clone(),
+            "bare spread expression outside array/object/call context",
+        )),
     }
+}
+
+fn compile_ternary(
+    t: &crate::ast::TernaryExpr,
+    chunk: &mut Chunk,
+    resolutions: &ResolutionMap,
+) -> Result<(), Object> {
+    compile_expr(&t.cond, chunk, resolutions)?;
+    let to_alternate = emit_jump_placeholder(chunk, Opcode::JumpIfFalse, t.pos.clone());
+    compile_expr(&t.consequent, chunk, resolutions)?;
+    let to_end = emit_jump_placeholder(chunk, Opcode::Jump, t.pos.clone());
+    patch_jump_here(chunk, to_alternate);
+    compile_expr(&t.alternate, chunk, resolutions)?;
+    patch_jump_here(chunk, to_end);
+    Ok(())
+}
+
+fn compile_optional(
+    o: &crate::ast::OptionalExpr,
+    chunk: &mut Chunk,
+    resolutions: &ResolutionMap,
+) -> Result<(), Object> {
+    compile_expr(&o.object, chunk, resolutions)?;
+    let nullish_jumps = emit_nullish_jump_checks(chunk, o.pos.clone());
+
+    if o.is_call {
+        compile_call_args(&o.args, false, o.pos.clone(), chunk, resolutions)?;
+    } else if o.computed {
+        compile_expr(&o.property, chunk, resolutions)?;
+        chunk.write_op(Opcode::GetIndex, o.pos.clone());
+    } else {
+        let name = object_property_key_expr(&o.property);
+        if name.is_empty() {
+            return Err(unsupported(o.pos.clone(), "optional property key"));
+        }
+        let name_idx = chunk.add_constant(str_obj(name));
+        chunk.write_op(Opcode::GetProperty, o.pos.clone());
+        chunk.write_u16(name_idx, o.pos.clone());
+    }
+
+    let to_end = emit_jump_placeholder(chunk, Opcode::Jump, o.pos.clone());
+    let nullish_ip = chunk.code.len() as u32;
+    for jump in nullish_jumps {
+        patch_jump_to(chunk, jump, nullish_ip);
+    }
+    chunk.write_op(Opcode::Pop, o.pos.clone());
+    let undefined_idx = chunk.add_constant(Object::Undefined);
+    emit_const(chunk, undefined_idx, o.pos.clone());
+    patch_jump_here(chunk, to_end);
+    Ok(())
+}
+
+fn emit_nullish_jump_checks(chunk: &mut Chunk, pos: crate::ast::Position) -> Vec<u32> {
+    chunk.write_op(Opcode::Dup, pos.clone());
+    let null_idx = chunk.add_constant(Object::Null);
+    emit_const(chunk, null_idx, pos.clone());
+    chunk.write_op(Opcode::Eq, pos.clone());
+    let null_jump = emit_jump_placeholder(chunk, Opcode::JumpIfTrue, pos.clone());
+
+    chunk.write_op(Opcode::Dup, pos.clone());
+    let undefined_idx = chunk.add_constant(Object::Undefined);
+    emit_const(chunk, undefined_idx, pos.clone());
+    chunk.write_op(Opcode::Eq, pos.clone());
+    let undefined_jump = emit_jump_placeholder(chunk, Opcode::JumpIfTrue, pos);
+
+    vec![null_jump, undefined_jump]
+}
+
+fn compile_call_args(
+    args: &[Expr],
+    has_this_receiver: bool,
+    pos: crate::ast::Position,
+    chunk: &mut Chunk,
+    resolutions: &ResolutionMap,
+) -> Result<(), Object> {
+    if args.iter().any(|arg| matches!(arg, Expr::Spread(_))) {
+        chunk.write_op(Opcode::NewArray, pos.clone());
+        chunk.write_u16(0, pos.clone());
+        for arg in args {
+            match arg {
+                Expr::Spread(sp) => {
+                    compile_expr(&sp.value, chunk, resolutions)?;
+                    chunk.write_op(Opcode::Spread, sp.pos.clone());
+                }
+                _ => {
+                    compile_expr(arg, chunk, resolutions)?;
+                    chunk.write_op(Opcode::PushArg, arg.pos());
+                }
+            }
+        }
+        chunk.write_op(Opcode::CallSpread, pos);
+        return Ok(());
+    }
+
+    for arg in args {
+        compile_expr(arg, chunk, resolutions)?;
+    }
+    let arg_count = args.len() as u16;
+    chunk.write_op(Opcode::Call, pos.clone());
+    chunk.write_u16(
+        encode_call_arg_count(arg_count, has_this_receiver, pos.clone())?,
+        pos,
+    );
+    Ok(())
 }
 
 fn compile_match(
@@ -1879,6 +1967,30 @@ mod tests {
         let chunk = compile_src("await value;");
         let spine = decode_opcode_spine(&chunk);
         assert!(spine.contains(&Opcode::Await));
+    }
+
+    #[test]
+    fn compiles_prefix_identity_opcode() {
+        let chunk = compile_src("+42");
+        let spine = decode_opcode_spine(&chunk);
+        assert!(spine.contains(&Opcode::Identity));
+    }
+
+    #[test]
+    fn compiles_ternary_branch_opcodes() {
+        let chunk = compile_src("true ? 1 : 2");
+        let spine = decode_opcode_spine(&chunk);
+        assert!(spine.contains(&Opcode::JumpIfFalse));
+        assert!(spine.contains(&Opcode::Jump));
+    }
+
+    #[test]
+    fn compiles_optional_chain_nullish_checks() {
+        let chunk = compile_src("let obj = null; obj?.name;");
+        let spine = decode_opcode_spine(&chunk);
+        assert!(spine.contains(&Opcode::Dup));
+        assert!(spine.contains(&Opcode::JumpIfTrue));
+        assert!(spine.contains(&Opcode::GetProperty));
     }
 
     #[test]

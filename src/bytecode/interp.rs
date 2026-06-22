@@ -162,6 +162,7 @@ impl<'a> VmState<'a> {
             Opcode::Not => self.un_op("!")?,
             Opcode::Neg => self.un_op("-")?,
             Opcode::BitNot => self.un_op("~")?,
+            Opcode::Identity => self.un_op("+")?,
 
             // —— control flow ——
             Opcode::Jump => {

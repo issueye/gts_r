@@ -92,6 +92,10 @@ fn all_parity_fixtures() -> Vec<Fixture> {
             expected: "truthy-logic=start:ok\n",
         },
         Fixture {
+            dir: "ternary_expression",
+            expected: "ternary-expression=yes:hit\n",
+        },
+        Fixture {
             dir: "template_literals",
             expected: "template-literals=gts:9\n",
         },
@@ -212,8 +216,20 @@ fn all_parity_fixtures() -> Vec<Fixture> {
             expected: "object-method-call=10:10\n",
         },
         Fixture {
+            dir: "optional_chain",
+            expected: "optional-chain=gts:7:undefined:5\n",
+        },
+        Fixture {
+            dir: "regexp_literal",
+            expected: "regexp-literal=/go+/i\n",
+        },
+        Fixture {
             dir: "class_basic",
             expected: "class-basic=7:7\n",
+        },
+        Fixture {
+            dir: "class_expression",
+            expected: "class-expression=9\n",
         },
         Fixture {
             dir: "class_inheritance_method",
