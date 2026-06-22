@@ -62,7 +62,7 @@ mod tests {
     use super::*;
     use crate::bytecode::compile;
     use crate::lexer::Lexer;
-    use crate::object::{Environment, Object, VirtualMachine};
+    use crate::object::{Environment, EventLoop, Object, VirtualMachine};
     use crate::parser::Parser;
 
     fn compile_src(src: &str) -> Chunk {
@@ -88,5 +88,16 @@ mod tests {
 
         let second = awaitable.poll(Rc::new(|| {}));
         assert!(matches!(second, PollResult::Ready(Object::Number(n)) if n == 3.0));
+    }
+
+    #[test]
+    fn bytecode_frame_awaitable_runs_on_event_loop() {
+        let chunk = compile_src("21 * 2");
+        let env = Environment::new_root(VirtualMachine::new());
+        let awaitable = BytecodeFrameAwaitable::new(chunk, env);
+
+        let event_loop = EventLoop::new();
+        let result = event_loop.run(awaitable);
+        assert!(matches!(result, PollResult::Ready(Object::Number(n)) if n == 42.0));
     }
 }
