@@ -685,6 +685,7 @@ fn operand_width(op: Opcode) -> u8 {
         | Opcode::Call
         | Opcode::Closure => 2,
         Opcode::Jump | Opcode::JumpIfFalse | Opcode::JumpIfTrue | Opcode::Loop => 4,
+        Opcode::LoadLocal | Opcode::StoreLocal | Opcode::LoadUpvalue | Opcode::StoreUpvalue => 1,
         _ => 0,
     }
 }

@@ -157,6 +157,14 @@ impl Chunk {
                             ip += 2;
                             format!(" {}", v)
                         }
+                        Opcode::LoadLocal
+                        | Opcode::StoreLocal
+                        | Opcode::LoadUpvalue
+                        | Opcode::StoreUpvalue => {
+                            let v = self.code[ip];
+                            ip += 1;
+                            format!(" {}", v)
+                        }
                         Opcode::Jump | Opcode::JumpIfFalse | Opcode::JumpIfTrue | Opcode::Loop => {
                             let v = self.read_u32(ip);
                             ip += 4;

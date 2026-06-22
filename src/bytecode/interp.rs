@@ -466,6 +466,43 @@ impl<'a> VmState<'a> {
                     ));
                 }
             }
+            Opcode::LoadUpvalue => {
+                let index = self.read_single_byte_operand("LOAD_UPVALUE")? as usize;
+                let pos = self.chunk.position_at(self.ip - 2);
+                let Some(upvalue) = self.current_upvalues.get(index) else {
+                    return Err(new_error(
+                        pos,
+                        format!("VMError: missing upvalue {}", index),
+                    ));
+                };
+                let Some(value) = upvalue.get(&self.stack) else {
+                    return Err(new_error(
+                        pos,
+                        format!("VMError: open upvalue {} points outside stack", index),
+                    ));
+                };
+                self.stack.push(value);
+            }
+            Opcode::StoreUpvalue => {
+                let index = self.read_single_byte_operand("STORE_UPVALUE")? as usize;
+                let pos = self.chunk.position_at(self.ip - 2);
+                let value = match self.stack.last() {
+                    Some(v) => v.clone(),
+                    None => return Err(self.stack_underflow(pos.clone())),
+                };
+                let Some(upvalue) = self.current_upvalues.get(index) else {
+                    return Err(new_error(
+                        pos,
+                        format!("VMError: missing upvalue {}", index),
+                    ));
+                };
+                if !upvalue.set(&mut self.stack, value) {
+                    return Err(new_error(
+                        pos,
+                        format!("VMError: upvalue {} points outside stack", index),
+                    ));
+                }
+            }
 
             other => {
                 return Err(new_error(
@@ -515,6 +552,17 @@ impl<'a> VmState<'a> {
 
     fn stack_underflow(&self, pos: Position) -> Object {
         new_error(pos, "VMError: stack underflow")
+    }
+
+    fn read_single_byte_operand(&mut self, opcode: &'static str) -> Result<u8, Object> {
+        let Some(byte) = self.chunk.code.get(self.ip).copied() else {
+            return Err(new_error(
+                self.chunk.position_at(self.ip.saturating_sub(1)),
+                format!("VMError: {} missing operand", opcode),
+            ));
+        };
+        self.ip += 1;
+        Ok(byte)
     }
 
     fn capture_proto_upvalues(
@@ -723,6 +771,12 @@ mod tests {
         interpret(&chunk, &env)
     }
 
+    fn run_chunk_with_upvalues(chunk: Chunk, upvalues: Vec<Rc<Upvalue>>) -> Object {
+        let vm = VirtualMachine::new();
+        let env = Environment::new_root(vm);
+        interpret_with_upvalues(&chunk, &env, upvalues)
+    }
+
     fn state_for_upvalue_tests() -> VmState<'static> {
         let chunk = Box::leak(Box::new(Chunk::new()));
         let vm = VirtualMachine::new();
@@ -777,6 +831,50 @@ mod tests {
         assert!(state.open_upvalues.is_empty());
         assert!(!kept.is_open());
         assert!(matches!(kept.get(&state.stack), Some(Object::Number(4.0))));
+    }
+
+    #[test]
+    fn load_upvalue_reads_closed_capture() {
+        let mut chunk = Chunk::new();
+        chunk.write_op(Opcode::LoadUpvalue, Position::default());
+        chunk.write_byte(0, Position::default());
+        chunk.write_op(Opcode::Return, Position::default());
+
+        let result = run_chunk_with_upvalues(chunk, vec![Upvalue::new_closed(Object::Number(8.0))]);
+
+        assert!(matches!(result, Object::Number(n) if n == 8.0));
+    }
+
+    #[test]
+    fn store_upvalue_updates_closed_capture_and_leaves_value() {
+        let mut chunk = Chunk::new();
+        let value = chunk.add_constant(Object::Number(11.0));
+        chunk.write_op(Opcode::Const, Position::default());
+        chunk.write_u16(value, Position::default());
+        chunk.write_op(Opcode::StoreUpvalue, Position::default());
+        chunk.write_byte(0, Position::default());
+        chunk.write_op(Opcode::Return, Position::default());
+        let upvalue = Upvalue::new_closed(Object::Number(1.0));
+
+        let result = run_chunk_with_upvalues(chunk, vec![upvalue.clone()]);
+
+        assert!(matches!(result, Object::Number(n) if n == 11.0));
+        assert!(matches!(upvalue.get(&[]), Some(Object::Number(11.0))));
+    }
+
+    #[test]
+    fn load_upvalue_can_read_open_stack_slot() {
+        let mut chunk = Chunk::new();
+        let outer = chunk.add_constant(Object::Number(13.0));
+        chunk.write_op(Opcode::Const, Position::default());
+        chunk.write_u16(outer, Position::default());
+        chunk.write_op(Opcode::LoadUpvalue, Position::default());
+        chunk.write_byte(0, Position::default());
+        chunk.write_op(Opcode::Return, Position::default());
+
+        let result = run_chunk_with_upvalues(chunk, vec![Upvalue::new_open(0)]);
+
+        assert!(matches!(result, Object::Number(n) if n == 13.0));
     }
 
     // —— arithmetic operators (each covered by its own case) ——
