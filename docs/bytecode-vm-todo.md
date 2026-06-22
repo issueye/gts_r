@@ -257,7 +257,8 @@
   - 证据：新增 `tests/bytecode_async.rs`，同一脚本分别以 `EXEC_MODE_TREEWALK` 与 `EXEC_MODE_BYTECODE` 运行并逐字节比较 `result.inspect()` 与 stdout；覆盖 Promise 静态 `resolve/reject/all/race`、Promise `then/catch/finally` 链、async function/arrow/class method、async 内 `try/catch` 捕获 `await Promise.reject(...)`、`setTimeout(0)`/`sleepAsync(0)`/`setInterval(0)`；验证：`cargo fmt --all --check` passed、`cargo test --test bytecode_async -- --nocapture` 4 passed、`cargo test --lib bytecode` 118 passed
 - [x] 9.5 覆盖度核对：`Await` + async `FuncDecl/Method/Arrow` 打勾
   - 证据：`src/bytecode/compiler.rs` 覆盖 `Expr::Await`，先编译 await operand 再发出 `Opcode::Await`，单测 `bytecode::compiler::tests::compiles_await_opcode` 覆盖；`Stmt::FuncDecl`、`Expr::Func`、`Expr::Arrow` 均将 AST 的 `is_async` 传入 `compile_function_proto`，单测 `records_async_function_proto`、`records_async_arrow_proto` 覆盖 proto 标记；`src/bytecode/class.rs` 的 `compile_class_decl` 将类 `Method/Constructor` 的 `member.is_async` 传入 `compile_method_proto`；`src/bytecode/call.rs` 对 `proto.is_async` 的 bytecode closure 返回 Promise，`src/bytecode/interp.rs` 单测 `async_function_call_returns_resolved_promise`、`async_arrow_can_be_awaited`、`async_method_can_be_awaited` 覆盖 async 函数/箭头/方法三路；`tests/bytecode_async.rs` 端到端覆盖 Promise 与 async-await tree/bytecode 对齐；验证：`cargo fmt --all --check` passed、`cargo test --test bytecode_async -- --nocapture` 4 passed、`cargo test --lib bytecode` 118 passed
-- [ ] 9.6 提交 `[bytecode-9] 异步`
+- [x] 9.6 提交 `[bytecode-9] 异步`
+  - 证据：阶段 9 已拆分提交：`f1d2b00 feat(bytecode): implement await opcode`（9.1）、`407f21c feat(bytecode): return promises from async closures`（9.2）、`f863fb3 test(bytecode): verify awaitable event loop bridge`（9.3）、`dd8f6fe test(bytecode): validate async promise contracts`（9.4）、`5350d08 docs(bytecode): audit async coverage`（9.5）；阶段 9 异步全集收口完成；最终验证：`cargo fmt --all --check` passed、`cargo test --lib bytecode` 118 passed、`cargo test --test bytecode_async -- --nocapture` 4 passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed、`cargo test --test bytecode_modules -- --nocapture` 2 passed
 
 ---
 
@@ -283,10 +284,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7 Match 全集与类型注解已完成并收口；阶段 8 模块系统全集已完成并收口；阶段 9.1 `OpAwait` 与 `BytecodeFrameAwaitable` 已完成；阶段 9.2 async 函数/方法/箭头 Promise 返回已完成；阶段 9.3 async runtime/EventLoop 复用接线已完成；阶段 9.4 Promise/async-await 契约门已完成；阶段 9.5 async 覆盖度核对已完成
-**下一条 TODO**：继续阶段 9，推进 9.6 异步阶段收口提交
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7 Match 全集与类型注解已完成并收口；阶段 8 模块系统全集已完成并收口；阶段 9 异步全集已完成并收口
+**下一条 TODO**：继续阶段 10，推进 10.1 全量 bytecode parity fixture 验收
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 9.5 已完成：核对 `Await` 与 async `FuncDecl/Method/Arrow` 编译和测试覆盖；下一步推进异步阶段收口）
+**最后更新**：2026-06-22（阶段 9.6 已完成：异步全集提交链收口，窄回归与模块门通过；下一步推进阶段 10 全量验收）
 
 ---
 
