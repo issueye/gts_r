@@ -304,7 +304,11 @@ impl<'a> VmState<'a> {
                         format!("VMError: missing class declaration {}", class_idx),
                     ));
                 };
-                let class = crate::evaluator::expressions::build_class(class_decl, &self.env)?;
+                let class = crate::bytecode::class::build_class(
+                    class_decl,
+                    &self.env,
+                    &crate::bytecode::resolve::ResolutionMap::default(),
+                )?;
                 self.stack.push(class);
             }
             Opcode::Closure => {
@@ -527,6 +531,21 @@ impl<'a> VmState<'a> {
             }
             Opcode::LoadThis => {
                 let value = self.env.borrow().this.clone().unwrap_or(Object::Undefined);
+                self.stack.push(value);
+            }
+            Opcode::SuperMethod => {
+                let name_idx = self.chunk.read_u16(self.ip) as usize;
+                self.ip += 2;
+                let pos = self.chunk.position_at(self.ip - 3);
+                let name = self.read_string_const(name_idx, pos.clone(), "SUPER_METHOD")?;
+                let value = if name == "constructor" {
+                    crate::evaluator::methods::get_super_constructor(&self.env, pos)
+                } else {
+                    crate::evaluator::methods::get_super_method(&self.env, &name, pos)
+                };
+                if value.is_runtime_error() {
+                    return Err(value);
+                }
                 self.stack.push(value);
             }
             Opcode::LoadUpvalue => {

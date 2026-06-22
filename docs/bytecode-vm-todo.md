@@ -161,8 +161,8 @@
   - 证据：`src/bytecode/compiler.rs` 支持数组 spread 字面量、对象 spread/computed key、member/index 赋值目标；`src/bytecode/interp.rs` 实现 `SetIndex`，并让 `Spread` 同时支持数组追加与对象属性拷贝，`SetProperty/SetIndex` 对齐赋值表达式返回值；新增单测 `array_literal_spread_builds_flat_array`、`object_literal_supports_spread_and_computed_keys`、`array_index_assignment_updates_element_and_returns_value`、`object_property_and_index_assignment_update_hash`；`tests/bytecode_parity.rs` 纳入 `arrays_objects`、`array_index_assignment`、`object_computed_key`、`object_nested_access`；`cargo test --lib bytecode` 86 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
 - [x] 5.2 `OpNew/DefineMethod/NewClass`；`CallFrame.this` 绑定（对齐 `environment.rs:26-29`）
   - 证据：`src/bytecode/compiler.rs` 覆盖 `Stmt::ClassDecl`/`Expr::Class` → `NewClass`，`Expr::New` → `New`，并用 `Call` 高位标记 member/index callee 的 receiver；`src/bytecode/chunk.rs` 保存 class decl 表，`src/bytecode/interp.rs` 执行 `NewClass` 时复用 `build_class`，执行 `LoadThis` 并把 receiver 透传到 builtin/bytecode closure/tree-walker function 调用；`src/bytecode/call.rs` 支持 bytecode closure 的显式 `this`；`DefineMethod` opcode 保持预留，方法体下沉到 VM 原型编译留给 5.3；`tests/bytecode_parity.rs` 纳入 `object_method_call`、`class_basic`、`class_method_this`；`cargo test --lib bytecode` 86 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
-- [ ] 5.3 super 方法解析（复用 `methods.rs` 逻辑）；`build_class` 下沉到编译器
-  - 证据：（待填）
+- [x] 5.3 super 方法解析（复用 `methods.rs` 逻辑）；`build_class` 下沉到编译器
+  - 证据：新增 `src/bytecode/class.rs` 在 VM 侧组装 `Class` 并把方法/构造器编译为 bytecode closure；`src/bytecode/compiler.rs` 编译 `super(...)` 与 `super.method(...)` 到 `SuperMethod` + receiver-aware `Call`；`src/bytecode/interp.rs` 实现 `SuperMethod` 分派；`src/evaluator/methods.rs` 扩展共享类构造/方法绑定以识别 `Object::Closure`，保留原 `Object::Function` 路径；`tests/bytecode_parity.rs` 纳入 `class_inheritance_method`、`class_inheritance_constructor`、`class_implicit_super`、`class_super_method_override`、`class_field_update`；`cargo test --test bytecode_parity -- --nocapture` 1 passed；`cargo test --lib bytecode` 86 passed
 - [ ] 5.4 computed key（`OpSetIndex`）/ 嵌套访问
   - 证据：（待填）
 - [ ] 5.5 阶段 5 契约门（VM 单跑全绿）：

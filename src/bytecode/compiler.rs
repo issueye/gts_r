@@ -613,17 +613,15 @@ fn patch_jump_to(chunk: &mut Chunk, operand_ip: u32, target: u32) {
 /// by the interpreter at call time into the call environment. Stage 4.2 also
 /// attaches the lexical upvalue descriptors; 4.4 will lower matching reads and
 /// writes from dynamic names to slot/upvalue opcodes.
-fn compile_function_proto(
+pub(crate) fn compile_method_proto(
     name: &str,
     params: Vec<crate::ast::Param>,
     body: crate::ast::BlockStmt,
     is_async: bool,
-    lexical_this: bool,
     return_t: Option<crate::ast::TypeAnnotation>,
     pos: crate::ast::Position,
-    parent: &mut Chunk,
     resolutions: &ResolutionMap,
-) -> Result<u16, Object> {
+) -> Result<Rc<FunctionProto>, Object> {
     let mut sub = Chunk::new();
     let mut loops: Vec<LoopFrame> = Vec::new();
     let n = body.statements.len();
@@ -644,16 +642,58 @@ fn compile_function_proto(
         params,
         body,
         is_async,
-        lexical_this,
+        false,
         return_t,
         pos,
         upvalue_desc,
     );
-    let idx = parent.protos.len() as u16;
-    // Fill the chunk before moving proto into the table (borrow then push).
     *proto.chunk.borrow_mut() = Some(Rc::new(sub));
+    Ok(proto)
+}
+
+fn compile_function_proto(
+    name: &str,
+    params: Vec<crate::ast::Param>,
+    body: crate::ast::BlockStmt,
+    is_async: bool,
+    lexical_this: bool,
+    return_t: Option<crate::ast::TypeAnnotation>,
+    pos: crate::ast::Position,
+    parent: &mut Chunk,
+    resolutions: &ResolutionMap,
+) -> Result<u16, Object> {
+    let proto = if lexical_this {
+        compile_lexical_function_proto(name, params, body, is_async, return_t, pos, resolutions)?
+    } else {
+        compile_method_proto(name, params, body, is_async, return_t, pos, resolutions)?
+    };
+    let idx = parent.protos.len() as u16;
     parent.protos.push(proto);
     Ok(idx)
+}
+
+fn compile_lexical_function_proto(
+    name: &str,
+    params: Vec<crate::ast::Param>,
+    body: crate::ast::BlockStmt,
+    is_async: bool,
+    return_t: Option<crate::ast::TypeAnnotation>,
+    pos: crate::ast::Position,
+    resolutions: &ResolutionMap,
+) -> Result<Rc<FunctionProto>, Object> {
+    let proto = compile_method_proto(name, params, body, is_async, return_t, pos, resolutions)?;
+    let rebuilt = FunctionProto::with_upvalues(
+        proto.name.clone(),
+        proto.params.clone(),
+        (*proto.body).clone(),
+        proto.is_async,
+        true,
+        proto.return_t.clone(),
+        proto.pos.clone(),
+        proto.upvalue_desc.clone(),
+    );
+    *rebuilt.chunk.borrow_mut() = proto.chunk.borrow().clone();
+    Ok(rebuilt)
 }
 
 /// True if the last instruction in the chunk is `op`.
@@ -933,6 +973,22 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk, resolutions: &ResolutionMap) -> 
 
         // —— function call (callee + args, then CALL) ——
         Expr::Call(c) => {
+            if let Expr::Super(_) = &c.callee {
+                chunk.write_op(Opcode::LoadThis, c.pos.clone());
+                let name_idx = chunk.add_constant(str_obj("constructor"));
+                chunk.write_op(Opcode::SuperMethod, c.pos.clone());
+                chunk.write_u16(name_idx, c.pos.clone());
+                for arg in &c.args {
+                    compile_expr(arg, chunk, resolutions)?;
+                }
+                let arg_count = c.args.len() as u16;
+                chunk.write_op(Opcode::Call, c.pos.clone());
+                chunk.write_u16(
+                    encode_call_arg_count(arg_count, true, c.pos.clone())?,
+                    c.pos.clone(),
+                );
+                return Ok(());
+            }
             let has_this_receiver = compile_call_callee(&c.callee, chunk, resolutions)?;
             if c.args.iter().any(|arg| matches!(arg, Expr::Spread(_))) {
                 chunk.write_op(Opcode::NewArray, c.pos.clone());
@@ -996,6 +1052,17 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk, resolutions: &ResolutionMap) -> 
         }
         Expr::This(t) => {
             chunk.write_op(Opcode::LoadThis, t.pos.clone());
+            Ok(())
+        }
+        Expr::Super(s) => {
+            if s.method.is_empty() {
+                let idx = chunk.add_constant(Object::Undefined);
+                emit_const(chunk, idx, s.pos.clone());
+            } else {
+                let name_idx = chunk.add_constant(str_obj(s.method.clone()));
+                chunk.write_op(Opcode::SuperMethod, s.pos.clone());
+                chunk.write_u16(name_idx, s.pos.clone());
+            }
             Ok(())
         }
         Expr::Class(c) => {
@@ -1097,6 +1164,17 @@ fn compile_call_callee(
     resolutions: &ResolutionMap,
 ) -> Result<bool, Object> {
     match callee {
+        Expr::Member(m) if matches!(&m.object, Expr::Super(_)) => {
+            chunk.write_op(Opcode::LoadThis, m.pos.clone());
+            let name = object_property_key_expr(&m.property);
+            if name.is_empty() {
+                return Err(unsupported(m.pos.clone(), "super method key"));
+            }
+            let name_idx = chunk.add_constant(str_obj(name));
+            chunk.write_op(Opcode::SuperMethod, m.pos.clone());
+            chunk.write_u16(name_idx, m.pos.clone());
+            Ok(true)
+        }
         Expr::Member(m) if !m.computed => {
             compile_expr(&m.object, chunk, resolutions)?;
             chunk.write_op(Opcode::Dup, m.pos.clone());

@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::ast::Position;
+use crate::ast::{Position, Stmt};
 use crate::object::*;
 
 use super::eval_core::eval_block;
@@ -35,10 +35,7 @@ pub fn get_property(obj: &Object, name: &str, pos: Position) -> Object {
             let mut current = Some(class.clone());
             while let Some(c) = current {
                 if let Some(m) = c.borrow_mut().methods.get(name).cloned() {
-                    if let Object::Function(f) = m {
-                        return bind_method(&f, obj.clone());
-                    }
-                    return m;
+                    return bind_method_value(m, obj.clone());
                 }
                 if let Some(s) = c.borrow_mut().statics.get(name) {
                     return s.clone();
@@ -288,6 +285,17 @@ fn bind_method(method: &Rc<Function>, this: Object) -> Object {
     Object::Function(bound)
 }
 
+fn bind_method_value(method: Object, this: Object) -> Object {
+    match method {
+        Object::Function(f) => bind_method(&f, this),
+        Object::Closure(c) => {
+            c.home_env.borrow_mut().this = Some(this);
+            Object::Closure(c)
+        }
+        other => other,
+    }
+}
+
 /// Construct an instance of a class.
 pub fn construct_class(
     cls: &Rc<RefCell<Class>>,
@@ -320,6 +328,7 @@ pub fn construct_class(
     let needs_implicit_super = super_.is_some()
         && match &ctor {
             Some(Object::Function(f)) => !constructor_calls_super(&f.body),
+            Some(Object::Closure(c)) => !block_calls_super(&c.proto.body),
             None => true,
             _ => false,
         };
@@ -332,14 +341,8 @@ pub fn construct_class(
         }
     }
     // Run the constructor (bound to `this`).
-    if let Some(Object::Function(con)) = &ctor {
-        let scope = Environment::child(&con.env);
-        scope.borrow_mut().this = Some(Object::Instance(inst.clone()));
-        scope.borrow_mut().constructor_class = Some(cls.clone());
-        if let Err(e) = bind_params(&scope, env, &con.params, args, pos.clone()) {
-            return e;
-        }
-        let r = eval_block(&con.body, &scope);
+    if let Some(con) = &ctor {
+        let r = call_constructor_value(con, cls, &inst, env, args, pos.clone());
         if r.is_runtime_error() {
             return r;
         }
@@ -360,20 +363,10 @@ fn call_constructor(
         return native(&mut ctx, inst, args);
     }
     let ctor = match cls.borrow_mut().methods.get("constructor").cloned() {
-        Some(Object::Function(f)) => f,
+        Some(ctor) => ctor,
         _ => return Object::Undefined,
     };
-    let scope = Environment::child(&ctor.env);
-    scope.borrow_mut().this = Some(Object::Instance(inst.clone()));
-    scope.borrow_mut().constructor_class = Some(cls.clone());
-    if let Err(e) = bind_params(&scope, env, &ctor.params, args, pos) {
-        return e;
-    }
-    let r = eval_block(&ctor.body, &scope);
-    if let Object::Return(ret) = r {
-        return *ret;
-    }
-    r
+    call_constructor_value(&ctor, cls, inst, env, args, pos)
 }
 
 /// super(...) constructor invocation.
@@ -395,6 +388,28 @@ pub fn call_super_constructor(env: &EnvRef, args: &[Object], pos: Position) -> O
     call_constructor(&super_, &inst, env, args, pos)
 }
 
+pub fn get_super_constructor(env: &EnvRef, pos: Position) -> Object {
+    let this = env.borrow_mut().this.clone();
+    let inst = match &this {
+        Some(Object::Instance(i)) => i.clone(),
+        _ => return new_error(pos, "ReferenceError: super is not available"),
+    };
+    let current = env
+        .borrow_mut()
+        .constructor_class
+        .clone()
+        .unwrap_or_else(|| inst.borrow_mut().class.clone());
+    let super_ = match current.borrow_mut().super_.clone() {
+        Some(s) => s,
+        None => return new_error(pos, "ReferenceError: super is not available"),
+    };
+    let ctor = super_.borrow_mut().methods.get("constructor").cloned();
+    match ctor {
+        Some(ctor) => bind_constructor_value(ctor, super_, Object::Instance(inst)),
+        None => Object::Undefined,
+    }
+}
+
 /// Get a super method (super.method).
 pub fn get_super_method(env: &EnvRef, name: &str, pos: Position) -> Object {
     let this = env.borrow_mut().this.clone();
@@ -406,10 +421,75 @@ pub fn get_super_method(env: &EnvRef, name: &str, pos: Position) -> Object {
         Some(s) => s,
         None => return new_error(pos, "ReferenceError: super is not available"),
     };
-    if let Some(Object::Function(m)) = super_.borrow_mut().methods.get(name).cloned() {
-        return bind_method(&m, Object::Instance(inst));
+    if let Some(m) = super_.borrow_mut().methods.get(name).cloned() {
+        return bind_method_value(m, Object::Instance(inst));
     }
     new_error(pos, format!("TypeError: super.{} is not a method", name))
+}
+
+fn bind_constructor_value(method: Object, class: Rc<RefCell<Class>>, this: Object) -> Object {
+    match method {
+        Object::Function(f) => {
+            let bound = bind_method(&f, this);
+            if let Object::Function(func) = &bound {
+                func.env.borrow_mut().constructor_class = Some(class);
+            }
+            bound
+        }
+        Object::Closure(c) => {
+            {
+                let mut env = c.home_env.borrow_mut();
+                env.this = Some(this);
+                env.constructor_class = Some(class);
+            }
+            Object::Closure(c)
+        }
+        other => other,
+    }
+}
+
+fn call_constructor_value(
+    ctor: &Object,
+    cls: &Rc<RefCell<Class>>,
+    inst: &Rc<RefCell<Instance>>,
+    env: &EnvRef,
+    args: &[Object],
+    pos: Position,
+) -> Object {
+    match ctor {
+        Object::Function(con) => {
+            let scope = Environment::child(&con.env);
+            scope.borrow_mut().this = Some(Object::Instance(inst.clone()));
+            scope.borrow_mut().constructor_class = Some(cls.clone());
+            if let Err(e) = bind_params(&scope, env, &con.params, args, pos) {
+                return e;
+            }
+            let r = eval_block(&con.body, &scope);
+            if let Object::Return(ret) = r {
+                *ret
+            } else {
+                r
+            }
+        }
+        Object::Closure(c) => {
+            {
+                let mut home = c.home_env.borrow_mut();
+                home.this = Some(Object::Instance(inst.clone()));
+                home.constructor_class = Some(cls.clone());
+            }
+            match crate::bytecode::call::call_closure_with_this(
+                c,
+                args,
+                env,
+                Some(Object::Instance(inst.clone())),
+                pos,
+            ) {
+                Ok(v) => v,
+                Err(e) => e,
+            }
+        }
+        _ => Object::Undefined,
+    }
 }
 
 /// Construct a value from a builtin constructor (new Date(...), new Map(...), etc.).
@@ -453,12 +533,24 @@ pub fn run_async_function(
 
 /// Whether a constructor body contains a `super(...)` call (naive scan).
 fn constructor_calls_super(body: &crate::ast::BlockStmt) -> bool {
+    block_calls_super(body)
+}
+
+fn block_calls_super(body: &crate::ast::BlockStmt) -> bool {
     body.statements.iter().any(node_calls_super_stmt)
 }
 
 fn node_calls_super_stmt(s: &crate::ast::Stmt) -> bool {
     match s {
-        crate::ast::Stmt::Expr(e) => node_calls_super_expr(&e.expr),
+        Stmt::Expr(e) => node_calls_super_expr(&e.expr),
+        Stmt::Block(b) => block_calls_super(b),
+        Stmt::If(i) => {
+            block_calls_super(&i.consequence)
+                || i.alternative
+                    .as_deref()
+                    .map(node_calls_super_stmt)
+                    .unwrap_or(false)
+        }
         _ => false,
     }
 }

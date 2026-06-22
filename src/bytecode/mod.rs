@@ -10,6 +10,7 @@
 
 pub mod call;
 pub mod chunk;
+pub mod class;
 pub mod closure;
 pub mod compiler;
 pub mod frame;

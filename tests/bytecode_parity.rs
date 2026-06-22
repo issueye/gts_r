@@ -197,8 +197,28 @@ fn stage_1_3_fixtures() -> Vec<Fixture> {
             expected: "class-basic=7:7\n",
         },
         Fixture {
+            dir: "class_inheritance_method",
+            expected: "class-inheritance-method=10\n",
+        },
+        Fixture {
+            dir: "class_inheritance_constructor",
+            expected: "class-inheritance-constructor=12\n",
+        },
+        Fixture {
+            dir: "class_implicit_super",
+            expected: "class-implicit-super=10\n",
+        },
+        Fixture {
+            dir: "class_super_method_override",
+            expected: "class-super-method-override=child:base:106\n",
+        },
+        Fixture {
             dir: "class_method_this",
             expected: "class-method-this=2:ab\n",
+        },
+        Fixture {
+            dir: "class_field_update",
+            expected: "class-field-update=12\n",
         },
     ]
 }

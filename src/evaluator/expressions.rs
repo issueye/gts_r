@@ -1131,7 +1131,7 @@ pub fn is_error_class_name(name: &str) -> bool {
     )
 }
 
-fn native_error_class(
+pub(crate) fn native_error_class(
     _env: &EnvRef,
     name: &str,
     pos: Position,
