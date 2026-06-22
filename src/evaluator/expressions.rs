@@ -132,34 +132,12 @@ fn eval_prefix(p: &PrefixExpr, env: &EnvRef) -> Object {
     if right.is_runtime_error() {
         return right;
     }
-    match p.op.as_str() {
-        "!" => Object::Boolean(!right.is_truthy()),
-        "-" => match &right {
-            Object::Number(n) => Object::Number(-*n),
-            _ => new_error(
-                p.pos.clone(),
-                format!("TypeError: cannot negate {}", right.type_tag()),
-            ),
-        },
-        "+" => match &right {
-            Object::Number(n) => Object::Number(*n),
-            _ => new_error(
-                p.pos.clone(),
-                format!("TypeError: cannot apply + to {}", right.type_tag()),
-            ),
-        },
-        "typeof" => Object::String(Rc::new(typeof_name(&right))),
-        "void" => Object::Undefined,
-        "delete" => Object::Boolean(true),
-        "~" => match &right {
-            Object::Number(n) => Object::Number(!(*n as i32) as f64),
-            _ => new_error(
-                p.pos.clone(),
-                format!("TypeError: cannot apply ~ to {}", right.type_tag()),
-            ),
-        },
-        _ => new_error(p.pos.clone(), format!("unknown prefix operator: {}", p.op)),
+    // `delete` is statement-like and always returns true; route the rest
+    // through the shared unary-op core.
+    if p.op == "delete" {
+        return Object::Boolean(true);
     }
+    apply_unary_op(p.op.as_str(), &right, p.pos.clone())
 }
 
 pub fn typeof_name(value: &Object) -> String {
@@ -207,34 +185,66 @@ fn eval_infix(i: &InfixExpr, env: &EnvRef) -> Object {
     if right.is_runtime_error() {
         return right;
     }
-    match i.op.as_str() {
-        "+" => eval_add(&left, &right, i.pos.clone()),
-        "-" => number_op(&left, &right, i.pos.clone(), |a, b| a - b),
-        "*" => number_op(&left, &right, i.pos.clone(), |a, b| a * b),
-        "/" => number_op(&left, &right, i.pos.clone(), |a, b| a / b),
-        "%" => number_op(&left, &right, i.pos.clone(), |a, b| a.rem_euclid(b)),
-        "**" => number_op(&left, &right, i.pos.clone(), |a, b| a.powf(b)),
-        "&" => bit_op(&left, &right, i.pos.clone(), |a, b| a & b),
-        "|" => bit_op(&left, &right, i.pos.clone(), |a, b| a | b),
-        "^" => bit_op(&left, &right, i.pos.clone(), |a, b| a ^ b),
-        "<<" => bit_op(&left, &right, i.pos.clone(), |a, b| {
-            a.wrapping_shl(b as u32)
-        }),
-        ">>" => bit_op(&left, &right, i.pos.clone(), |a, b| {
-            a.wrapping_shr(b as u32)
-        }),
-        ">>>" => bit_op(&left, &right, i.pos.clone(), |a, b| {
+    apply_binary_op(i.op.as_str(), &left, &right, i.pos.clone())
+}
+
+/// Apply a binary operator to two already-evaluated operands.
+///
+/// This is the pure (non-short-circuit) core of `eval_infix`, factored out so
+/// the bytecode VM can reuse the exact same semantics byte-for-byte without
+/// duplicating logic. Short-circuit operators (`&&` / `||` / `??`) are handled
+/// by the caller (tree-walker evaluates the right operand lazily; the VM
+/// lowers them to conditional jumps) and must NOT be routed through here.
+pub fn apply_binary_op(op: &str, left: &Object, right: &Object, pos: Position) -> Object {
+    match op {
+        "+" => eval_add(left, right, pos),
+        "-" => number_op(left, right, pos, |a, b| a - b),
+        "*" => number_op(left, right, pos, |a, b| a * b),
+        "/" => number_op(left, right, pos, |a, b| a / b),
+        "%" => number_op(left, right, pos, |a, b| a.rem_euclid(b)),
+        "**" => number_op(left, right, pos, |a, b| a.powf(b)),
+        "&" => bit_op(left, right, pos, |a, b| a & b),
+        "|" => bit_op(left, right, pos, |a, b| a | b),
+        "^" => bit_op(left, right, pos, |a, b| a ^ b),
+        "<<" => bit_op(left, right, pos, |a, b| a.wrapping_shl(b as u32)),
+        ">>" => bit_op(left, right, pos, |a, b| a.wrapping_shr(b as u32)),
+        ">>>" => bit_op(left, right, pos, |a, b| {
             ((a as u32).wrapping_shr(b as u32)) as i32
         }),
-        "===" => Object::Boolean(strict_equal(&left, &right)),
-        "!==" => Object::Boolean(!strict_equal(&left, &right)),
-        "<" => compare(&left, &right, "<", i.pos.clone()),
-        "<=" => compare(&left, &right, "<=", i.pos.clone()),
-        ">" => compare(&left, &right, ">", i.pos.clone()),
-        ">=" => compare(&left, &right, ">=", i.pos.clone()),
-        "instanceof" => eval_instanceof(&left, &right),
-        "in" => eval_in(&left, &right, i.pos.clone()),
-        _ => new_error(i.pos.clone(), format!("unknown infix operator: {}", i.op)),
+        "===" => Object::Boolean(strict_equal(left, right)),
+        "!==" => Object::Boolean(!strict_equal(left, right)),
+        "<" => compare(left, right, "<", pos),
+        "<=" => compare(left, right, "<=", pos),
+        ">" => compare(left, right, ">", pos),
+        ">=" => compare(left, right, ">=", pos),
+        "instanceof" => eval_instanceof(left, right),
+        "in" => eval_in(left, right, pos),
+        _ => new_error(pos, format!("unknown infix operator: {}", op)),
+    }
+}
+
+/// Apply a unary prefix operator to an already-evaluated operand.
+///
+/// Pure core of `eval_prefix`, shared with the bytecode VM. Excludes
+/// `++`/`--` (which are update operators handled separately with assignment).
+pub fn apply_unary_op(op: &str, right: &Object, pos: Position) -> Object {
+    match op {
+        "!" => Object::Boolean(!right.is_truthy()),
+        "-" => match right {
+            Object::Number(n) => Object::Number(-*n),
+            _ => new_error(pos, format!("TypeError: cannot negate {}", right.type_tag())),
+        },
+        "+" => match right {
+            Object::Number(n) => Object::Number(*n),
+            _ => new_error(pos, format!("TypeError: cannot apply + to {}", right.type_tag())),
+        },
+        "typeof" => Object::String(Rc::new(typeof_name(right))),
+        "void" => Object::Undefined,
+        "~" => match right {
+            Object::Number(n) => Object::Number(!(*n as i32) as f64),
+            _ => new_error(pos, format!("TypeError: cannot apply ~ to {}", right.type_tag())),
+        },
+        _ => new_error(pos, format!("unknown prefix operator: {}", op)),
     }
 }
 

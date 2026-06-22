@@ -10,10 +10,11 @@
 //! contract (`1 + 2` → `3.0`) holds while still rejecting bad types.
 
 use crate::ast::Position;
-use crate::object::{new_error, str_obj, EnvRef, Object};
+use crate::object::{new_error, EnvRef, Object};
 
 use super::chunk::Chunk;
 use super::opcode::Opcode;
+use crate::evaluator::expressions::{apply_binary_op, apply_unary_op};
 
 /// Execute a compiled chunk under the given (root) environment. The
 /// environment is only used to reach the VM and globals; stage-0 code has no
@@ -47,88 +48,150 @@ impl<'a> VmState<'a> {
                     "VMError: ran off the end of bytecode without RETURN",
                 );
             }
-            let byte = self.chunk.code[self.ip];
-            let op = match Opcode::from_byte(byte) {
-                Some(op) => op,
-                None => {
-                    return new_error(
-                        self.chunk.position_at(self.ip),
-                        format!("VMError: unknown opcode byte 0x{:02x}", byte),
-                    );
-                }
-            };
-            self.ip += 1;
-            match op {
-                Opcode::Const => {
-                    let idx = self.chunk.read_u16(self.ip) as usize;
-                    self.ip += 2;
-                    let value = self.chunk.constants[idx].clone();
-                    self.stack.push(value);
-                }
-                Opcode::Add => {
-                    let pos = self.chunk.position_at(self.ip - 1);
-                    if let Err(e) = self.do_add(pos) {
-                        return e;
-                    }
-                }
-                Opcode::Pop => {
-                    self.stack.pop();
-                }
-                Opcode::Return => {
-                    // The top-level program returns whatever sits on the stack
-                    // (or Undefined if empty), matching the tree-walker's
-                    // "last expression statement" result.
-                    return self.stack.pop().unwrap_or(Object::Undefined);
-                }
-                // Every other opcode is a later stage's responsibility. Hitting
-                // one here means the compiler emitted bytecode the interpreter
-                // can't run yet — surface it loudly rather than silently
-                // misbehaving.
-                other => {
-                    return new_error(
-                        self.chunk.position_at(self.ip - 1),
-                        format!("VMError: opcode {:?} not implemented in stage 0", other),
-                    );
-                }
+            match self.step() {
+                Ok(Flow::Continue) => {}
+                Ok(Flow::Return(v)) => return v,
+                Err(e) => return e,
             }
         }
     }
 
-    /// Pop two operands and push their sum. Mirrors `eval_add`:
-    /// number+number → number, string+string → string, otherwise TypeError.
-    fn do_add(&mut self, pos: Position) -> Result<(), Object> {
-        let right = match self.stack.pop() {
-            Some(v) => v,
-            None => return Err(self.stack_underflow(pos)),
+    /// Decode and execute one instruction. Returning `Result` lets opcode
+    /// handlers use `?` for error propagation; `run` translates the outcomes.
+    fn step(&mut self) -> Result<Flow, Object> {
+        let byte = self.chunk.code[self.ip];
+        let op = match Opcode::from_byte(byte) {
+            Some(op) => op,
+            None => {
+                return Err(new_error(
+                    self.chunk.position_at(self.ip),
+                    format!("VMError: unknown opcode byte 0x{:02x}", byte),
+                ));
+            }
         };
-        let left = match self.stack.pop() {
-            Some(v) => v,
-            None => return Err(self.stack_underflow(pos)),
-        };
-        if let (Object::Number(a), Object::Number(b)) = (&left, &right) {
-            self.stack.push(Object::Number(a + b));
-            return Ok(());
+        self.ip += 1;
+        match op {
+            Opcode::Const => {
+                let idx = self.chunk.read_u16(self.ip) as usize;
+                self.ip += 2;
+                let value = self.chunk.constants[idx].clone();
+                self.stack.push(value);
+            }
+            Opcode::Pop => {
+                self.stack.pop();
+            }
+            Opcode::Dup => {
+                let v = self.stack.last().cloned().ok_or_else(|| {
+                    self.stack_underflow(self.chunk.position_at(self.ip - 1))
+                })?;
+                self.stack.push(v);
+            }
+
+            // —— binary operators: delegate to the shared evaluator core ——
+            Opcode::Add => self.bin_op("+")?,
+            Opcode::Sub => self.bin_op("-")?,
+            Opcode::Mul => self.bin_op("*")?,
+            Opcode::Div => self.bin_op("/")?,
+            Opcode::Mod => self.bin_op("%")?,
+            Opcode::Pow => self.bin_op("**")?,
+            Opcode::Eq => self.bin_op("===")?,
+            Opcode::Neq => self.bin_op("!==")?,
+            Opcode::Lt => self.bin_op("<")?,
+            Opcode::Le => self.bin_op("<=")?,
+            Opcode::Gt => self.bin_op(">")?,
+            Opcode::Ge => self.bin_op(">=")?,
+            // Concat is a specialised `+` for the string-only fast path; route
+            // through the same core so semantics stay identical.
+            Opcode::Concat => self.bin_op("+")?,
+
+            // —— unary operators ——
+            Opcode::Not => self.un_op("!")?,
+            Opcode::Neg => self.un_op("-")?,
+
+            // —— control flow ——
+            Opcode::Jump => {
+                let target = self.chunk.read_u32(self.ip) as usize;
+                self.ip = target;
+            }
+            Opcode::JumpIfFalse => {
+                let target = self.chunk.read_u32(self.ip) as usize;
+                self.ip += 4;
+                let pos = self.chunk.position_at(self.ip - 5);
+                let cond = self.stack.pop().ok_or_else(|| self.stack_underflow(pos))?;
+                if !cond.is_truthy() {
+                    self.ip = target;
+                }
+            }
+            Opcode::JumpIfTrue => {
+                let target = self.chunk.read_u32(self.ip) as usize;
+                self.ip += 4;
+                let pos = self.chunk.position_at(self.ip - 5);
+                let cond = self.stack.pop().ok_or_else(|| self.stack_underflow(pos))?;
+                if cond.is_truthy() {
+                    self.ip = target;
+                }
+            }
+
+            Opcode::Return => {
+                let v = self.stack.pop().unwrap_or(Object::Undefined);
+                return Ok(Flow::Return(v));
+            }
+
+            other => {
+                return Err(new_error(
+                    self.chunk.position_at(self.ip - 1),
+                    format!("VMError: opcode {:?} not implemented yet", other),
+                ));
+            }
         }
-        if let (Object::String(a), Object::String(b)) = (&left, &right) {
-            self.stack.push(str_obj(format!("{}{}", a, b)));
-            return Ok(());
+        Ok(Flow::Continue)
+    }
+
+    /// Pop two operands, apply a binary op via the shared evaluator core, push
+    /// the result. The op string matches the GTS source operator so semantics
+    /// are byte-identical to the tree-walker.
+    fn bin_op(&mut self, op: &'static str) -> Result<(), Object> {
+        let pos = self.chunk.position_at(self.ip - 1);
+        let right = self
+            .stack
+            .pop()
+            .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+        let left = self
+            .stack
+            .pop()
+            .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+        let result = apply_binary_op(op, &left, &right, pos);
+        if result.is_runtime_error() {
+            return Err(result);
         }
-        // Stage 1 will promote this to a shared evaluator helper so the error
-        // wording stays identical to the tree-walker. For stage 0 the only
-        // contract inputs are numeric, so this branch is unreachable in tests.
-        Err(new_error(
-            pos,
-            format!(
-                "TypeError: cannot add {} and {} — types must match",
-                left.type_tag(),
-                right.type_tag()
-            ),
-        ))
+        self.stack.push(result);
+        Ok(())
+    }
+
+    /// Pop one operand, apply a unary op, push the result.
+    fn un_op(&mut self, op: &'static str) -> Result<(), Object> {
+        let pos = self.chunk.position_at(self.ip - 1);
+        let right = self
+            .stack
+            .pop()
+            .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+        let result = apply_unary_op(op, &right, pos);
+        if result.is_runtime_error() {
+            return Err(result);
+        }
+        self.stack.push(result);
+        Ok(())
     }
 
     fn stack_underflow(&self, pos: Position) -> Object {
         new_error(pos, "VMError: stack underflow")
     }
+}
+
+/// One-step control-flow outcome.
+enum Flow {
+    Continue,
+    Return(Object),
 }
 
 #[cfg(test)]
@@ -164,7 +227,131 @@ mod tests {
         assert!(matches!(result, Object::Number(n) if n == 6.0));
     }
 
-    // Note: string concatenation (`"foo" + "bar"`) is exercised in stage 1
-    // once String literals compile. The `do_add` string path is already in
-    // place; it just has no driver test until literals are supported.
+    // —— arithmetic operators (each covered by its own case) ——
+    #[test]
+    fn arithmetic_sub() {
+        assert!(matches!(run_src("10 - 3"), Object::Number(n) if n == 7.0));
+    }
+    #[test]
+    fn arithmetic_mul() {
+        assert!(matches!(run_src("4 * 5"), Object::Number(n) if n == 20.0));
+    }
+    #[test]
+    fn arithmetic_div() {
+        assert!(matches!(run_src("20 / 4"), Object::Number(n) if n == 5.0));
+    }
+    #[test]
+    fn arithmetic_mod() {
+        // number_op uses rem_euclid; 10 % 3 == 1
+        assert!(matches!(run_src("10 % 3"), Object::Number(n) if n == 1.0));
+    }
+    #[test]
+    fn arithmetic_pow() {
+        assert!(matches!(run_src("2 ** 10"), Object::Number(n) if n == 1024.0));
+    }
+    #[test]
+    fn precedence_mul_before_add() {
+        assert!(matches!(run_src("2 + 3 * 4"), Object::Number(n) if n == 14.0));
+    }
+
+    // —— comparison operators ——
+    #[test]
+    fn compare_eq_true() {
+        assert!(matches!(run_src("3 === 3"), Object::Boolean(true)));
+    }
+    #[test]
+    fn compare_eq_false() {
+        assert!(matches!(run_src("3 === 4"), Object::Boolean(false)));
+    }
+    #[test]
+    fn compare_neq() {
+        assert!(matches!(run_src("3 !== 4"), Object::Boolean(true)));
+    }
+    #[test]
+    fn compare_lt() {
+        assert!(matches!(run_src("2 < 3"), Object::Boolean(true)));
+        assert!(matches!(run_src("3 < 2"), Object::Boolean(false)));
+    }
+    #[test]
+    fn compare_le() {
+        assert!(matches!(run_src("3 <= 3"), Object::Boolean(true)));
+        assert!(matches!(run_src("4 <= 3"), Object::Boolean(false)));
+    }
+    #[test]
+    fn compare_gt() {
+        assert!(matches!(run_src("5 > 3"), Object::Boolean(true)));
+        assert!(matches!(run_src("3 > 5"), Object::Boolean(false)));
+    }
+    #[test]
+    fn compare_ge() {
+        assert!(matches!(run_src("3 >= 3"), Object::Boolean(true)));
+        assert!(matches!(run_src("2 >= 3"), Object::Boolean(false)));
+    }
+
+    // —— unary ——
+    #[test]
+    fn unary_neg() {
+        assert!(matches!(run_src("-5"), Object::Number(n) if n == -5.0));
+        assert!(matches!(run_src("-(3 + 2)"), Object::Number(n) if n == -5.0));
+    }
+    #[test]
+    fn unary_not_bool() {
+        assert!(matches!(run_src("!false"), Object::Boolean(true)));
+        assert!(matches!(run_src("!true"), Object::Boolean(false)));
+    }
+    #[test]
+    fn unary_not_truthiness() {
+        // numbers: 0 is falsy, non-zero truthy
+        assert!(matches!(run_src("!0"), Object::Boolean(true)));
+        assert!(matches!(run_src("!1"), Object::Boolean(false)));
+    }
+
+    // —— short-circuit && / || ——
+    #[test]
+    fn and_returns_left_when_falsy() {
+        // 0 && 1 → 0 (left, short-circuits)
+        assert!(matches!(run_src("0 && 1"), Object::Number(n) if n == 0.0));
+    }
+    #[test]
+    fn and_returns_right_when_left_truthy() {
+        // 1 && 2 → 2
+        assert!(matches!(run_src("1 && 2"), Object::Number(n) if n == 2.0));
+    }
+    #[test]
+    fn or_returns_left_when_truthy() {
+        // 7 || 0 → 7
+        assert!(matches!(run_src("7 || 0"), Object::Number(n) if n == 7.0));
+    }
+    #[test]
+    fn or_returns_right_when_left_falsy() {
+        // 0 || 9 → 9
+        assert!(matches!(run_src("0 || 9"), Object::Number(n) if n == 9.0));
+    }
+    #[test]
+    fn and_short_circuits_bool() {
+        // false && true → false (right never semantically matters)
+        assert!(matches!(run_src("false && true"), Object::Boolean(false)));
+    }
+    #[test]
+    fn or_short_circuits_bool() {
+        // true || false → true
+        assert!(matches!(run_src("true || false"), Object::Boolean(true)));
+    }
+
+    // —— null / undefined literals (needed to exercise falsy paths) ——
+    #[test]
+    fn null_literal_is_falsy_in_and() {
+        // null && 1 → null
+        assert!(matches!(run_src("null && 1"), Object::Null));
+    }
+    #[test]
+    fn undefined_literal_is_falsy_in_or() {
+        // undefined || 42 → 42
+        assert!(matches!(run_src("undefined || 42"), Object::Number(n) if n == 42.0));
+    }
+
+    // Note: string concatenation (`"foo" + "bar"`) is exercised in stage 1.2
+    // once String literals compile. The shared `apply_binary_op("+")` path
+    // already handles string+string; it just has no driver test until
+    // `Expr::String` is supported by the compiler.
 }
