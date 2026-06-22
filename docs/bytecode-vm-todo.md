@@ -150,7 +150,8 @@
   - 证据：`tests/bytecode_parity.rs::stage_1_3_fixtures` 纳入 `function_closure`、`closure_counter`、`closure_iife`、`closure_returned_frame`；新增 `tests/fixtures/parity/{closure_counter,closure_iife,closure_returned_frame}/main.gs`；树遍历基线分别为 `closure-counter=1:2:3`、`closure-iife=goscript`、`closure-returned-frame=42`；`cargo test --test bytecode_parity -- --nocapture` 1 passed；`cargo test --test parity_compat rust_cli_matches_parity_fixtures -- --nocapture` 1 passed；`cargo test --lib bytecode` 82 passed
 - [x] 4.6 debug + release 双跑一致（验证无悬空栈槽 UB）
   - 证据：`cargo test --test bytecode_parity -- --nocapture` 1 passed；`cargo test --release --test bytecode_parity -- --nocapture` 1 passed；`cargo test --lib bytecode` 82 passed；`cargo test --release --lib bytecode` 82 passed；debug/release 均覆盖 `function_closure`、`closure_counter`、`closure_iife`、`closure_returned_frame`，未出现悬空栈槽或优化构建差异
-- [ ] 4.7 提交 `[bytecode-4] 闭包与 upvalue`
+- [x] 4.7 提交 `[bytecode-4] 闭包与 upvalue`
+  - 证据：阶段 4 已拆分提交：`806697e feat(bytecode): add upvalue state model`（4.1）、`355b982 feat(bytecode): add closure variable resolver`（4.2）、`f4e477e feat(bytecode): wire open upvalue lifetime`（4.3）、`8693e8a feat(bytecode): implement upvalue opcodes`（4.4）、`1d32e82 feat(bytecode): validate closure capture parity`（4.5）、`e8c5c4e test(bytecode): verify closure parity in release`（4.6）；阶段收口提交记录本条证据
 
 ---
 
@@ -274,10 +275,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4.1 已新增 `src/bytecode/upvalue.rs` 两态 Upvalue 模型；阶段 4.2 已新增 `src/bytecode/resolve.rs` 并把函数 upvalue 描述接入 `FunctionProto`；阶段 4.3/4.4 已接入 open upvalue 生命周期与 upvalue 指令；阶段 4.5 已通过 `function_closure` 和闭包专项 parity fixture；阶段 4.6 debug/release 双跑一致
-**下一条 TODO**：继续阶段 4，推进 4.7 提交 `[bytecode-4] 闭包与 upvalue`
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交，包含 Upvalue 两态模型、变量解析 pass、open upvalue 生命周期、upvalue 指令、闭包 parity fixture、debug/release 双跑
+**下一条 TODO**：进入阶段 5，推进 5.1 `OpNewArray/NewObject/GetProperty/SetProperty/GetIndex/SetIndex/Spread`
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 4.6 debug/release 双跑证据：`cargo test --test bytecode_parity -- --nocapture` 1 passed；`cargo test --release --test bytecode_parity -- --nocapture` 1 passed；`cargo test --lib bytecode` 82 passed；`cargo test --release --lib bytecode` 82 passed；阶段 4.5 闭包契约门证据：`function_closure`、`closure_counter`、`closure_iife`、`closure_returned_frame` 纳入 bytecode parity 与树遍历 parity；阶段 4.4 upvalue 指令证据：`LoadUpvalue/StoreUpvalue` 执行分支 + 3 个 opcode 单测；阶段 4.3 open_upvalues 证据：`VmState::open_upvalues/current_upvalues`，`OpClosure` 捕获 `LocalSlot/ParentUpvalue`，`Return/ReturnNull` 闭合）
+**最后更新**：2026-06-22（阶段 4 已收口：提交 `806697e`/`355b982`/`f4e477e`/`8693e8a`/`1d32e82`/`e8c5c4e` 覆盖 4.1-4.6；阶段 4.6 debug/release 双跑证据：`cargo test --test bytecode_parity -- --nocapture` 1 passed；`cargo test --release --test bytecode_parity -- --nocapture` 1 passed；`cargo test --lib bytecode` 82 passed；`cargo test --release --lib bytecode` 82 passed；下一步进入阶段 5 对象模型）
 
 ---
 
