@@ -268,6 +268,11 @@ impl<'a> VmState<'a> {
                 let proto = self.chunk.protos[proto_idx].clone();
                 let upvalues = self.capture_proto_upvalues(&proto)?;
                 let closure = crate::bytecode::closure::ClosureData {
+                    upvalue_names: proto
+                        .upvalue_desc
+                        .iter()
+                        .map(|desc| desc.name.clone())
+                        .collect(),
                     proto,
                     upvalues,
                     home_env: self.env.clone(),
@@ -573,7 +578,11 @@ impl<'a> VmState<'a> {
         for desc in &proto.upvalue_desc {
             match desc.source {
                 UpvalueSource::LocalSlot(slot) => {
-                    captured.push(self.capture_open_upvalue(slot as usize));
+                    if let Some(value) = self.capture_env_value(&desc.name) {
+                        captured.push(Upvalue::new_closed(value));
+                    } else {
+                        captured.push(self.capture_open_upvalue(slot as usize));
+                    }
                 }
                 UpvalueSource::ParentUpvalue(index) => {
                     let Some(parent) = self.current_upvalues.get(index as usize) else {
@@ -600,6 +609,10 @@ impl<'a> VmState<'a> {
         let upvalue = Upvalue::new_open(slot);
         entry.push(upvalue.clone());
         upvalue
+    }
+
+    fn capture_env_value(&self, name: &str) -> Option<Object> {
+        self.env.borrow().get(name)
     }
 
     fn close_open_upvalues_from(&mut self, first_slot: usize) {

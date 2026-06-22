@@ -156,8 +156,22 @@ fn stage_1_3_fixtures() -> Vec<Fixture> {
             dir: "array_map_callback",
             expected: "array-map-callback=2|4|6\n",
         },
-        // function_closure needs upvalue capture (stage 4). It SKIPs via the
-        // compile-error path until its dependency lands.
+        Fixture {
+            dir: "function_closure",
+            expected: "function-closure=13\n",
+        },
+        Fixture {
+            dir: "closure_counter",
+            expected: "closure-counter=1:2:3\n",
+        },
+        Fixture {
+            dir: "closure_iife",
+            expected: "closure-iife=goscript\n",
+        },
+        Fixture {
+            dir: "closure_returned_frame",
+            expected: "closure-returned-frame=42\n",
+        },
     ]
 }
 

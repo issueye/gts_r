@@ -59,6 +59,7 @@ fn call_closure_impl(
     ) {
         return Err(e);
     }
+    bind_upvalues_into_scope(c, &scope);
     let _frame = crate::bytecode::frame::CallFrame::from_bound_env(proto.clone(), &scope, 0);
 
     let chunk = match proto.chunk.borrow().clone() {
@@ -66,9 +67,33 @@ fn call_closure_impl(
         None => return Err(new_error(pos, "VMError: function body not compiled")),
     };
     let result = super::interp::interpret_with_upvalues(&chunk, &scope, c.upvalues.clone());
+    flush_scope_to_upvalues(c, &scope);
     if result.is_runtime_error() {
         Err(result)
     } else {
         Ok(result)
+    }
+}
+
+fn bind_upvalues_into_scope(c: &crate::bytecode::closure::ClosureData, scope: &EnvRef) {
+    for (name, upvalue) in c.upvalue_names.iter().zip(c.upvalues.iter()) {
+        if let Some(value) = upvalue.get(&[]) {
+            scope.borrow_mut().set_here(name.clone(), value);
+        }
+    }
+}
+
+fn flush_scope_to_upvalues(c: &crate::bytecode::closure::ClosureData, scope: &EnvRef) {
+    for (name, upvalue) in c.upvalue_names.iter().zip(c.upvalues.iter()) {
+        let Some(value) = scope
+            .borrow()
+            .bindings
+            .get(name)
+            .map(|binding| binding.value.clone())
+        else {
+            continue;
+        };
+        let mut empty_slots = [];
+        upvalue.set(&mut empty_slots, value);
     }
 }

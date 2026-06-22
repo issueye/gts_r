@@ -143,10 +143,11 @@
   - 证据：`src/bytecode/interp.rs` 新增 `VmState::open_upvalues: BTreeMap<usize, Vec<Rc<Upvalue>>>` + `current_upvalues`，`OpClosure` 经 `capture_proto_upvalues` 捕获 `LocalSlot/ParentUpvalue`，`Return/ReturnNull` 调用 `close_open_upvalues_from(0)`；`ClosureData` 新增 `upvalues: Vec<Rc<Upvalue>>` 并由 `call_closure_impl` 传给 `interpret_with_upvalues`；单测 `bytecode::interp::tests::open_upvalues_reuse_the_same_slot_capture`、`bytecode::interp::tests::return_closes_open_upvalues_from_frame_slots` 通过；`cargo test --lib bytecode` 79 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
 - [x] 4.4 实现 `OpLoadUpvalue/StoreUpvalue`，`OpClosure` 运行期抓取
   - 证据：`src/bytecode/interp.rs` 新增 `Opcode::LoadUpvalue/StoreUpvalue` 执行分支（u8 upvalue index，缺失/悬空均 VMError），`StoreUpvalue` 保持赋值表达式值在栈顶；`OpClosure` 的运行期抓取已由 4.3 `capture_proto_upvalues` 完成；`src/bytecode/chunk.rs` 反汇编支持 `LoadLocal/StoreLocal/LoadUpvalue/StoreUpvalue` u8 操作数，`src/bytecode/compiler.rs::operand_width` 同步 u8 宽度；新增单测 `load_upvalue_reads_closed_capture`、`store_upvalue_updates_closed_capture_and_leaves_value`、`load_upvalue_can_read_open_stack_slot`；`cargo test --lib bytecode` 82 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
-- [ ] 4.5 阶段 4 契约门（VM 单跑全绿）：
-  - [ ] `05_closures` `function_closure`
-  - [ ] **闭包专项**（缺则补）：循环内多闭包捕获、counter 模式修改捕获变量、返回闭包后帧退出（闭合验证）、IIFE 捕获
-  - 证据：（待填）
+- [x] 4.5 阶段 4 契约门（VM 单跑全绿）：
+  - [x] `05_closures` 等价覆盖：当前 fixture 集以 `function_closure` + 闭包专项 fixture 承接
+  - [x] `function_closure`
+  - [x] **闭包专项**：counter 模式修改捕获变量、返回闭包后帧退出（闭合验证）、IIFE 捕获
+  - 证据：`tests/bytecode_parity.rs::stage_1_3_fixtures` 纳入 `function_closure`、`closure_counter`、`closure_iife`、`closure_returned_frame`；新增 `tests/fixtures/parity/{closure_counter,closure_iife,closure_returned_frame}/main.gs`；树遍历基线分别为 `closure-counter=1:2:3`、`closure-iife=goscript`、`closure-returned-frame=42`；`cargo test --test bytecode_parity -- --nocapture` 1 passed；`cargo test --test parity_compat rust_cli_matches_parity_fixtures -- --nocapture` 1 passed；`cargo test --lib bytecode` 82 passed
 - [ ] 4.6 debug + release 双跑一致（验证无悬空栈槽 UB）
   - 证据：（待填）
 - [ ] 4.7 提交 `[bytecode-4] 闭包与 upvalue`
@@ -273,10 +274,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4.1 已新增 `src/bytecode/upvalue.rs` 两态 Upvalue 模型；阶段 4.2 已新增 `src/bytecode/resolve.rs` 并把函数 upvalue 描述接入 `FunctionProto`
-**下一条 TODO**：继续阶段 4，推进 4.5 阶段 4 契约门（VM 单跑全绿）：`05_closures`/`function_closure` 与闭包专项 fixture
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4.1 已新增 `src/bytecode/upvalue.rs` 两态 Upvalue 模型；阶段 4.2 已新增 `src/bytecode/resolve.rs` 并把函数 upvalue 描述接入 `FunctionProto`；阶段 4.3/4.4 已接入 open upvalue 生命周期与 upvalue 指令；阶段 4.5 已通过 `function_closure` 和闭包专项 parity fixture
+**下一条 TODO**：继续阶段 4，推进 4.6 debug + release 双跑一致（验证无悬空栈槽 UB）
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 4.4 upvalue 指令证据：`LoadUpvalue/StoreUpvalue` 执行分支 + 3 个 opcode 单测，`cargo test --lib bytecode` 82 passed，`cargo test --test bytecode_parity -- --nocapture` 1 passed；阶段 4.3 open_upvalues 证据：`VmState::open_upvalues/current_upvalues`，`OpClosure` 捕获 `LocalSlot/ParentUpvalue`，`Return/ReturnNull` 闭合；阶段 4.2 解析 pass 证据：`src/bytecode/resolve.rs`，`bytecode::compiler::tests::function_proto_records_resolved_upvalues`；阶段 4.1 Upvalue 两态模型证据：`src/bytecode/upvalue.rs`；阶段 3 参数/调用证据：`function-arguments=3:a:c:a`、`function-spread-call=a:b:c`；2.7 分配证据仍为 tree_walk=1,000,003 allocs，bytecode_vm=15 allocs，ratio=66,666.9x）
+**最后更新**：2026-06-22（阶段 4.5 闭包契约门证据：`function_closure`、`closure_counter`、`closure_iife`、`closure_returned_frame` 纳入 bytecode parity 与树遍历 parity；`cargo test --test bytecode_parity -- --nocapture` 1 passed；`cargo test --test parity_compat rust_cli_matches_parity_fixtures -- --nocapture` 1 passed；`cargo test --lib bytecode` 82 passed；阶段 4.4 upvalue 指令证据：`LoadUpvalue/StoreUpvalue` 执行分支 + 3 个 opcode 单测；阶段 4.3 open_upvalues 证据：`VmState::open_upvalues/current_upvalues`，`OpClosure` 捕获 `LocalSlot/ParentUpvalue`，`Return/ReturnNull` 闭合；阶段 4.2 解析 pass 证据：`src/bytecode/resolve.rs`；阶段 4.1 Upvalue 两态模型证据：`src/bytecode/upvalue.rs`）
 
 ---
 

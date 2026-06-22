@@ -260,6 +260,24 @@ fn expected_fixture_cases() -> Vec<FixtureCase> {
             expected_stdout: "function-closure=13\n",
         },
         FixtureCase {
+            name: "closure counter",
+            dir: "closure_counter",
+            invocation: Invocation::RunFile("main.gs"),
+            expected_stdout: "closure-counter=1:2:3\n",
+        },
+        FixtureCase {
+            name: "closure iife",
+            dir: "closure_iife",
+            invocation: Invocation::RunFile("main.gs"),
+            expected_stdout: "closure-iife=goscript\n",
+        },
+        FixtureCase {
+            name: "closure returned frame",
+            dir: "closure_returned_frame",
+            invocation: Invocation::RunFile("main.gs"),
+            expected_stdout: "closure-returned-frame=42\n",
+        },
+        FixtureCase {
             name: "recursive function",
             dir: "recursive_function",
             invocation: Invocation::RunFile("main.gs"),

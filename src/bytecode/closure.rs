@@ -74,6 +74,9 @@ pub struct ClosureData {
     /// Runtime upvalues captured when `OpClosure` executes. Stage 4.3 wires
     /// capture/close lifetime; 4.4 will make load/store opcodes consume these.
     pub upvalues: Vec<Rc<Upvalue>>,
+    /// Name order matching `upvalues`. This is a stage-4 bridge for the
+    /// remaining name-table execution path until local-slot reads replace it.
+    pub upvalue_names: Vec<String>,
     /// The environment captured at definition. Stage 3 uses it as the parent
     /// for the call scope so globals resolve; stage 4 adds true upvalue
     /// capture for locals.
