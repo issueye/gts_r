@@ -135,6 +135,7 @@ fn compile_stmt(
             Ok(())
         }
         Stmt::Try(s) => compile_try(s, chunk, loops, resolutions),
+        Stmt::Import(s) => compile_import(s, chunk),
         Stmt::FuncDecl(f) => {
             // Compile the body to a proto (which lives in this chunk's proto
             // table), emit OP_CLOSURE to construct the closure value, then
@@ -261,6 +262,49 @@ fn compile_try(
         });
     }
     Ok(())
+}
+
+fn compile_import(s: &crate::ast::ImportDecl, chunk: &mut Chunk) -> Result<(), Object> {
+    let source = crate::evaluator::eval_core::strip_quotes(&s.source);
+    let source_idx = chunk.add_constant(str_obj(source));
+    chunk.write_op(Opcode::ImportModule, s.pos.clone());
+    chunk.write_u16(source_idx, s.pos.clone());
+
+    if !s.default.is_empty() {
+        compile_import_binding("default", &s.default, s.pos.clone(), chunk);
+    }
+    if !s.namespace.is_empty() {
+        chunk.write_op(Opcode::Dup, s.pos.clone());
+        let name_idx = chunk.add_constant(str_obj(s.namespace.clone()));
+        chunk.write_op(Opcode::StoreName, s.pos.clone());
+        chunk.write_u16(name_idx, s.pos.clone());
+    }
+    for name in &s.names {
+        compile_import_binding(name, name, s.pos.clone(), chunk);
+    }
+    let mut aliases: Vec<_> = s.aliases.iter().collect();
+    aliases.sort_by(|(left, _), (right, _)| left.cmp(right));
+    for (exported, local) in aliases {
+        compile_import_binding(exported, local, s.pos.clone(), chunk);
+    }
+
+    chunk.write_op(Opcode::Pop, s.pos.clone());
+    Ok(())
+}
+
+fn compile_import_binding(
+    exported_name: &str,
+    local_name: &str,
+    pos: crate::ast::Position,
+    chunk: &mut Chunk,
+) {
+    chunk.write_op(Opcode::Dup, pos.clone());
+    let property_idx = chunk.add_constant(str_obj(exported_name));
+    chunk.write_op(Opcode::GetProperty, pos.clone());
+    chunk.write_u16(property_idx, pos.clone());
+    let local_idx = chunk.add_constant(str_obj(local_name));
+    chunk.write_op(Opcode::StoreName, pos.clone());
+    chunk.write_u16(local_idx, pos);
 }
 
 /// Compile `if (cond) { ... } else { ... }`.
@@ -824,7 +868,8 @@ fn operand_width(op: Opcode) -> u8 {
         | Opcode::NewArray
         | Opcode::New
         | Opcode::Call
-        | Opcode::Closure => 2,
+        | Opcode::Closure
+        | Opcode::ImportModule => 2,
         Opcode::StoreTypedName => 4,
         Opcode::Jump | Opcode::JumpIfFalse | Opcode::JumpIfTrue | Opcode::Loop => 4,
         Opcode::LoadLocal | Opcode::StoreLocal | Opcode::LoadUpvalue | Opcode::StoreUpvalue => 1,
@@ -1742,6 +1787,19 @@ mod tests {
         assert!(spine.contains(&Opcode::StoreTypedName));
         assert_eq!(chunk.types.len(), 1);
         assert_eq!(chunk.types[0].to_string(), "number");
+    }
+
+    #[test]
+    fn compiles_import_bindings_from_module_object() {
+        let chunk = compile_src(r#"import def, { named, other as alias } from "mod";"#);
+        let spine = decode_opcode_spine(&chunk);
+        assert!(spine.contains(&Opcode::ImportModule));
+        assert!(spine.contains(&Opcode::GetProperty));
+        assert!(spine.contains(&Opcode::StoreName));
+        assert!(chunk
+            .constants
+            .iter()
+            .any(|value| matches!(value, Object::String(s) if s.as_ref() == "mod")));
     }
 
     #[test]

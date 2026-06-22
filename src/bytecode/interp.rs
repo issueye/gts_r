@@ -209,6 +209,23 @@ impl<'a> VmState<'a> {
                 self.stack
                     .push(str_obj(crate::evaluator::expressions::typeof_name(&v)));
             }
+            Opcode::ImportModule => {
+                let source_idx = self.chunk.read_u16(self.ip) as usize;
+                self.ip += 2;
+                let pos = self.chunk.position_at(self.ip - 3);
+                let source = self.read_string_const(source_idx, pos.clone(), "IMPORT_MODULE")?;
+                let importer = self.env.borrow().vm.importer();
+                let module = match importer {
+                    Some(importer) => importer(&self.env, &source)?,
+                    None => {
+                        return Err(new_error(
+                            pos,
+                            "ImportError: module loading is not configured",
+                        ));
+                    }
+                };
+                self.stack.push(module);
+            }
             Opcode::Call => {
                 let encoded_arg_count = self.chunk.read_u16(self.ip);
                 let has_this_receiver = encoded_arg_count & 0x8000 != 0;
@@ -1204,6 +1221,15 @@ mod tests {
         interpret(&chunk, &env)
     }
 
+    fn module_fixture() -> Object {
+        let module = Rc::new(RefCell::new(HashData::default()));
+        module.borrow_mut().set("default", str_obj("D"));
+        module.borrow_mut().set("named", str_obj("N"));
+        module.borrow_mut().set("other", str_obj("A"));
+        module.borrow_mut().set("extra", str_obj("X"));
+        Object::Hash(module)
+    }
+
     fn run_src_tree_and_bytecode(src: &str) -> (Object, Object) {
         let lexer = Lexer::new(src);
         let mut parser = Parser::new(lexer, "t.gs");
@@ -1364,6 +1390,40 @@ mod tests {
     fn chain_add_left_associative() {
         let result = run_src("1 + 2 + 3");
         assert!(matches!(result, Object::Number(n) if n == 6.0));
+    }
+
+    #[test]
+    fn import_statement_binds_default_named_alias_and_namespace() {
+        let chunk = compile_src(
+            r#"
+            import def, { named, other as alias } from "mod";
+            import * as ns from "mod";
+            def + ":" + named + ":" + alias + ":" + ns.extra;
+            "#,
+        );
+        let vm = VirtualMachine::new();
+        vm.set_importer(Rc::new(|_env, spec| {
+            assert_eq!(spec, "mod");
+            Ok(module_fixture())
+        }));
+        let env = Environment::new_root(vm);
+        let result = interpret(&chunk, &env);
+
+        assert!(matches!(result, Object::String(s) if s.as_ref() == "D:N:A:X"));
+        assert!(matches!(env.borrow().get("def"), Some(Object::String(s)) if s.as_ref() == "D"));
+        assert!(matches!(env.borrow().get("named"), Some(Object::String(s)) if s.as_ref() == "N"));
+        assert!(matches!(env.borrow().get("alias"), Some(Object::String(s)) if s.as_ref() == "A"));
+        assert!(matches!(env.borrow().get("ns"), Some(Object::Hash(_))));
+    }
+
+    #[test]
+    fn import_statement_reports_missing_importer() {
+        let result = run_src(r#"import value from "mod";"#);
+        let Object::Error(data) = result else {
+            panic!("expected import error");
+        };
+        assert_eq!(data.borrow().name, "ImportError");
+        assert_eq!(data.borrow().message, "module loading is not configured");
     }
 
     #[test]

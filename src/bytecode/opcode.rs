@@ -127,6 +127,9 @@ pub enum Opcode {
     ThrowMatchError = 93,
     /// Pop a value and push its `typeof` string.
     TypeOf = 94,
+    /// Load a module through the VM importer callback. Operand: u16 source
+    /// string index.
+    ImportModule = 95,
 }
 
 impl Opcode {
@@ -196,6 +199,7 @@ impl Opcode {
             92 => Opcode::ToString,
             93 => Opcode::ThrowMatchError,
             94 => Opcode::TypeOf,
+            95 => Opcode::ImportModule,
             _ => return None,
         })
     }
@@ -263,6 +267,7 @@ impl Opcode {
             Opcode::ToString => "TO_STRING",
             Opcode::ThrowMatchError => "THROW_MATCH_ERROR",
             Opcode::TypeOf => "TYPEOF",
+            Opcode::ImportModule => "IMPORT_MODULE",
         }
     }
 }

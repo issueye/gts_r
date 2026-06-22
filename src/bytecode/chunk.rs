@@ -158,7 +158,8 @@ impl Chunk {
                         | Opcode::NewArray
                         | Opcode::New
                         | Opcode::Call
-                        | Opcode::Closure => {
+                        | Opcode::Closure
+                        | Opcode::ImportModule => {
                             let v = self.read_u16(ip);
                             ip += 2;
                             format!(" {}", v)
