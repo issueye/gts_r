@@ -184,8 +184,8 @@
   - 证据：`src/bytecode/compiler.rs` 编译 `Stmt::Throw` 为表达式求值 + `Opcode::Throw`，编译 `Stmt::Try` 时写入 `Chunk.protected_regions` 的 `try_start/try_end/handler_ip/finally_ip/catch_binding_slot`，并把 catch 入口降为栈顶异常绑定；`src/bytecode/interp.rs` 实现 `Opcode::Throw`，非 Error 抛值按树遍历语义包装为 runtime `Error` 并保留 `thrown`；新增单测 `bytecode::compiler::tests::compiles_throw_opcode`、`bytecode::compiler::tests::records_try_protected_region`、`bytecode::interp::tests::throw_opcode_wraps_non_error_value`；`cargo test --lib bytecode` 89 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
 - [x] 6.2 Interp 抛错 unwind：沿帧栈查 region，命中跳 handler，否则向上
   - 证据：`src/bytecode/interp.rs` 为 `VmState` 记录 `last_ip`，`run()` 在 `step()` 返回 runtime error 时调用 `unwind_to_handler`，按 `Chunk.protected_regions` 查找覆盖 fault ip 的最内层 region，命中时把 catch 值压栈并跳到 `handler_ip`，未命中则原样向调用方返回；catch 绑定前将 runtime `Error` 转为可读 catch 值；新增单测 `bytecode::interp::tests::try_catch_unwinds_to_handler` 覆盖 `throw "boom"` 命中 catch 并读取 `err.message`；`cargo test --lib bytecode` 90 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
-- [ ] 6.3 finally 语义：无论是否抛错都执行；finally 内 throw 覆盖原异常
-  - 证据：（待填）
+- [x] 6.3 finally 语义：无论是否抛错都执行；finally 内 throw 覆盖原异常
+  - 证据：`src/bytecode/compiler.rs::compile_try` 为 try/catch/finally 生成正常 finally 路径与异常 finally 路径，异常路径保存 pending error、执行 finally 后重新 `Throw`，并额外保护 catch 区间使 catch 内 throw 也进入 finally；finally 内新 `Throw` 会直接替换原 pending error；新增单测 `bytecode::interp::tests::try_finally_runs_on_normal_path`、`catch_then_finally_runs_in_order`、`finally_throw_overrides_original_throw`，并更新 `bytecode::compiler::tests::records_try_protected_region` 验证 catch 保护区；`cargo test --lib bytecode` 93 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
 - [ ] 6.4 阶段 6 契约门（VM 单跑全绿）：
   - [ ] `09_errors`
   - [ ] `try_catch` `try_finally_no_throw` `catch_finally_order`
@@ -277,10 +277,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6.1-6.2 `OpThrow`、`Chunk.protected_regions` 与 catch unwind 已完成
-**下一条 TODO**：继续阶段 6，推进 6.3 finally 语义：无论是否抛错都执行；finally 内 throw 覆盖原异常
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6.1-6.3 `OpThrow`、`Chunk.protected_regions`、catch unwind 与 finally 语义已完成
+**下一条 TODO**：继续阶段 6，推进 6.4 阶段 6 契约门（VM 单跑全绿）
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 6.2 已完成：解释器 runtime error 命中 protected region 时压入 catch 值并跳转 handler，未命中则向调用方返回；验证 `cargo test --lib bytecode` 90 passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed；下一步实现 finally 顺序语义）
+**最后更新**：2026-06-22（阶段 6.3 已完成：try/catch/finally 的正常 finally、异常 finally 与 finally 覆盖原异常语义均有 VM 单测；验证 `cargo test --lib bytecode` 93 passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed；下一步纳入错误处理 parity 门）
 
 ---
 

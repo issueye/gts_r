@@ -1054,6 +1054,57 @@ mod tests {
     }
 
     #[test]
+    fn try_finally_runs_on_normal_path() {
+        let result = run_src(
+            r#"
+            let label = "start";
+            try {
+                label = label + ":try";
+            } finally {
+                label = label + ":finally";
+            }
+            label;
+            "#,
+        );
+        assert!(matches!(result, Object::String(s) if s.as_ref() == "start:try:finally"));
+    }
+
+    #[test]
+    fn catch_then_finally_runs_in_order() {
+        let result = run_src(
+            r#"
+            let label = "start";
+            try {
+                throw "boom";
+            } catch (err) {
+                label = label + ":catch";
+            } finally {
+                label = label + ":finally";
+            }
+            label;
+            "#,
+        );
+        assert!(matches!(result, Object::String(s) if s.as_ref() == "start:catch:finally"));
+    }
+
+    #[test]
+    fn finally_throw_overrides_original_throw() {
+        let result = run_src(
+            r#"
+            try {
+                throw "first";
+            } finally {
+                throw "second";
+            }
+            "#,
+        );
+        let Object::Error(data) = result else {
+            panic!("expected runtime error");
+        };
+        assert_eq!(data.borrow().message, "second");
+    }
+
+    #[test]
     fn stage0_contract_one_plus_two() {
         // The single non-negotiable stage-0 contract: 1 + 2 → 3.0
         let result = run_src("1 + 2");

@@ -188,14 +188,10 @@ fn compile_try(
         compile_stmt(stmt, chunk, loops, false, resolutions)?;
     }
     let try_end = chunk.code.len() as u32;
+    let to_normal_finally = emit_jump_placeholder(chunk, Opcode::Jump, s.pos.clone());
 
-    let skip_catch = if s.catch.is_some() {
-        Some(emit_jump_placeholder(chunk, Opcode::Jump, s.pos.clone()))
-    } else {
-        None
-    };
-
-    let handler_ip = chunk.code.len() as u32;
+    let catch_start = chunk.code.len() as u32;
+    let mut catch_end = catch_start;
     if let Some(catch) = &s.catch {
         if catch.name.is_empty() {
             chunk.write_op(Opcode::Pop, catch.pos.clone());
@@ -207,25 +203,60 @@ fn compile_try(
         for stmt in &catch.body.statements {
             compile_stmt(stmt, chunk, loops, false, resolutions)?;
         }
+        catch_end = chunk.code.len() as u32;
     }
 
-    let finally_ip = s.finalizer.as_ref().map(|_| chunk.code.len() as u32);
-    if let Some(skip) = skip_catch {
-        patch_jump_here(chunk, skip);
-    }
+    patch_jump_here(chunk, to_normal_finally);
     if let Some(finalizer) = &s.finalizer {
         for stmt in &finalizer.statements {
             compile_stmt(stmt, chunk, loops, false, resolutions)?;
         }
     }
 
+    let to_end = if s.finalizer.is_some() {
+        Some(emit_jump_placeholder(chunk, Opcode::Jump, s.pos.clone()))
+    } else {
+        None
+    };
+
+    let exceptional_finally_ip = s.finalizer.as_ref().map(|_| chunk.code.len() as u32);
+    if let Some(finalizer) = &s.finalizer {
+        let pending_name = format!("__gts_bc_pending_error_{}_{}", s.pos.line, s.pos.col);
+        let pending_idx = chunk.add_constant(str_obj(pending_name.clone()));
+        chunk.write_op(Opcode::StoreName, s.pos.clone());
+        chunk.write_u16(pending_idx, s.pos.clone());
+        for stmt in &finalizer.statements {
+            compile_stmt(stmt, chunk, loops, false, resolutions)?;
+        }
+        emit_load_name(chunk, &pending_name, s.pos.clone());
+        chunk.write_op(Opcode::Throw, s.pos.clone());
+    }
+
+    if let Some(end) = to_end {
+        patch_jump_here(chunk, end);
+    }
+
+    let handler_ip = if s.catch.is_some() {
+        catch_start
+    } else {
+        exceptional_finally_ip.unwrap_or(catch_start)
+    };
     chunk.protected_regions.push(super::chunk::ProtectedRegion {
         try_start,
         try_end,
         handler_ip,
-        finally_ip,
+        finally_ip: exceptional_finally_ip,
         catch_binding_slot: None,
     });
+    if s.finalizer.is_some() && catch_end > catch_start {
+        chunk.protected_regions.push(super::chunk::ProtectedRegion {
+            try_start: catch_start,
+            try_end: catch_end,
+            handler_ip: exceptional_finally_ip.unwrap(),
+            finally_ip: exceptional_finally_ip,
+            catch_binding_slot: None,
+        });
+    }
     Ok(())
 }
 
@@ -1556,7 +1587,7 @@ mod tests {
     #[test]
     fn records_try_protected_region() {
         let chunk = compile_src("try { 1; } catch (err) { 2; } finally { 3; }");
-        assert_eq!(chunk.protected_regions.len(), 1);
+        assert_eq!(chunk.protected_regions.len(), 2);
         let region = &chunk.protected_regions[0];
         assert!(region.try_start < region.try_end);
         assert!(region.try_end < region.handler_ip);
@@ -1567,6 +1598,8 @@ mod tests {
             Opcode::from_byte(chunk.code[region.handler_ip as usize]),
             Some(Opcode::StoreName)
         );
+        let catch_region = &chunk.protected_regions[1];
+        assert_eq!(catch_region.handler_ip, region.finally_ip.unwrap());
     }
 
     #[test]
