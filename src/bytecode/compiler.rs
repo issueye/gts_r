@@ -126,6 +126,12 @@ fn compile_stmt(
         Stmt::Break(s) => compile_break_continue(true, &s.label, s.pos.clone(), chunk, loops),
         Stmt::Continue(s) => compile_break_continue(false, &s.label, s.pos.clone(), chunk, loops),
         Stmt::Labeled(s) => compile_labeled(s, chunk, loops, keep_value, resolutions),
+        Stmt::Throw(s) => {
+            compile_expr(&s.value, chunk, resolutions)?;
+            chunk.write_op(Opcode::Throw, s.pos.clone());
+            Ok(())
+        }
+        Stmt::Try(s) => compile_try(s, chunk, loops, resolutions),
         Stmt::FuncDecl(f) => {
             // Compile the body to a proto (which lives in this chunk's proto
             // table), emit OP_CLOSURE to construct the closure value, then
@@ -169,6 +175,58 @@ fn compile_stmt(
         }
         _ => Err(unsupported(stmt.pos(), &format!("statement {:?}", stmt))),
     }
+}
+
+fn compile_try(
+    s: &crate::ast::TryStmt,
+    chunk: &mut Chunk,
+    loops: &mut Vec<LoopFrame>,
+    resolutions: &ResolutionMap,
+) -> Result<(), Object> {
+    let try_start = chunk.code.len() as u32;
+    for stmt in &s.block.statements {
+        compile_stmt(stmt, chunk, loops, false, resolutions)?;
+    }
+    let try_end = chunk.code.len() as u32;
+
+    let skip_catch = if s.catch.is_some() {
+        Some(emit_jump_placeholder(chunk, Opcode::Jump, s.pos.clone()))
+    } else {
+        None
+    };
+
+    let handler_ip = chunk.code.len() as u32;
+    if let Some(catch) = &s.catch {
+        if catch.name.is_empty() {
+            chunk.write_op(Opcode::Pop, catch.pos.clone());
+        } else {
+            let name_idx = chunk.add_constant(str_obj(catch.name.clone()));
+            chunk.write_op(Opcode::StoreName, catch.pos.clone());
+            chunk.write_u16(name_idx, catch.pos.clone());
+        }
+        for stmt in &catch.body.statements {
+            compile_stmt(stmt, chunk, loops, false, resolutions)?;
+        }
+    }
+
+    let finally_ip = s.finalizer.as_ref().map(|_| chunk.code.len() as u32);
+    if let Some(skip) = skip_catch {
+        patch_jump_here(chunk, skip);
+    }
+    if let Some(finalizer) = &s.finalizer {
+        for stmt in &finalizer.statements {
+            compile_stmt(stmt, chunk, loops, false, resolutions)?;
+        }
+    }
+
+    chunk.protected_regions.push(super::chunk::ProtectedRegion {
+        try_start,
+        try_end,
+        handler_ip,
+        finally_ip,
+        catch_binding_slot: None,
+    });
+    Ok(())
 }
 
 /// Compile `if (cond) { ... } else { ... }`.
@@ -1463,8 +1521,6 @@ mod tests {
     }
 
     /// Decode just the opcode bytes, skipping each instruction's operands.
-    /// Stage 0 only emits CONST(u16), ADD(0), RETURN(0), so operand widths are
-    /// known; this helper will grow as later stages add instructions.
     fn decode_opcode_spine(chunk: &Chunk) -> Vec<Opcode> {
         let mut out = Vec::new();
         let mut ip = 0;
@@ -1472,26 +1528,44 @@ mod tests {
             let op = Opcode::from_byte(chunk.code[ip]).expect("valid opcode");
             out.push(op);
             ip += 1;
-            // Skip operands: CONST reads a u16, the rest read nothing.
-            if op == Opcode::Const {
-                ip += 2;
-            }
+            ip += operand_width(op) as usize;
         }
         out
     }
 
     #[test]
     fn rejects_unsupported_node() {
-        // try/catch is stage 6; the compiler must refuse rather than silently
-        // miscompile. (Earlier this tested `let`, then `function` — both now
-        // supported.)
-        let lexer = Lexer::new("try { 1 } catch (e) { 2 }");
+        // Unsupported nodes must be refused rather than silently miscompiled.
+        let lexer = Lexer::new("typeof value");
         let mut parser = Parser::new(lexer, "t.gs");
         let program = parser.parse_program();
         let result = compile(&program);
         assert!(
             result.is_err(),
-            "try/catch should not compile before stage 6"
+            "unsupported prefix operator should not compile"
+        );
+    }
+
+    #[test]
+    fn compiles_throw_opcode() {
+        let chunk = compile_src("throw \"boom\";");
+        let spine = decode_opcode_spine(&chunk);
+        assert!(spine.contains(&Opcode::Throw));
+    }
+
+    #[test]
+    fn records_try_protected_region() {
+        let chunk = compile_src("try { 1; } catch (err) { 2; } finally { 3; }");
+        assert_eq!(chunk.protected_regions.len(), 1);
+        let region = &chunk.protected_regions[0];
+        assert!(region.try_start < region.try_end);
+        assert!(region.try_end < region.handler_ip);
+        assert!(region.finally_ip.is_some());
+        assert!(region.finally_ip.unwrap() > region.handler_ip);
+        assert_eq!(region.catch_binding_slot, None);
+        assert_eq!(
+            Opcode::from_byte(chunk.code[region.handler_ip as usize]),
+            Some(Opcode::StoreName)
         );
     }
 

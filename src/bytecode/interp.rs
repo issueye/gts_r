@@ -10,7 +10,9 @@
 //! contract (`1 + 2` → `3.0`) holds while still rejecting bad types.
 
 use crate::ast::Position;
-use crate::object::{new_error, str_obj, ArrayData, CallContext, EnvRef, HashData, Object};
+use crate::object::{
+    new_error, new_named_error, str_obj, ArrayData, CallContext, EnvRef, HashData, Object,
+};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -585,6 +587,14 @@ impl<'a> VmState<'a> {
                     ));
                 }
             }
+            Opcode::Throw => {
+                let pos = self.chunk.position_at(self.ip - 1);
+                let value = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                return Err(throw_value(value, pos));
+            }
 
             other => {
                 return Err(new_error(
@@ -828,6 +838,33 @@ impl<'a> VmState<'a> {
     }
 }
 
+fn throw_value(value: Object, pos: Position) -> Object {
+    match value {
+        Object::Error(e) => {
+            let mut data = e.borrow_mut().clone();
+            data.runtime = true;
+            if data.pos.is_zero() {
+                data.pos = pos.clone();
+            }
+            if data.stack.is_empty() {
+                data.stack = if pos.is_zero() {
+                    format!("{}: {}", data.name, data.message)
+                } else {
+                    format!("{}: {}\n    at {}", data.name, data.message, pos)
+                };
+            }
+            Object::Error(Rc::new(RefCell::new(data)))
+        }
+        other => {
+            let err = new_named_error(pos, "Error", other.inspect());
+            if let Object::Error(data) = &err {
+                data.borrow_mut().thrown = Some(other);
+            }
+            err
+        }
+    }
+}
+
 /// One-step control-flow outcome.
 enum Flow {
     Continue,
@@ -943,6 +980,19 @@ mod tests {
         let vm = VirtualMachine::new();
         let env = Environment::new_root(vm);
         VmState::new(chunk, env, Vec::new())
+    }
+
+    #[test]
+    fn throw_opcode_wraps_non_error_value() {
+        let result = run_src("throw \"boom\";");
+        let Object::Error(data) = result else {
+            panic!("expected runtime error");
+        };
+        let data = data.borrow();
+        assert!(data.runtime);
+        assert_eq!(data.name, "Error");
+        assert_eq!(data.message, "boom");
+        assert!(matches!(data.thrown.as_ref(), Some(Object::String(s)) if s.as_ref() == "boom"));
     }
 
     #[test]

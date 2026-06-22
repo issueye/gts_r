@@ -180,8 +180,8 @@
 
 ## 阶段 6：错误处理全集
 
-- [ ] 6.1 `OpThrow` + `Chunk.protected_regions`（`ProtectedRegion { try_start, try_end, handler_ip, finally_ip, catch_binding_slot }`）
-  - 证据：（待填）
+- [x] 6.1 `OpThrow` + `Chunk.protected_regions`（`ProtectedRegion { try_start, try_end, handler_ip, finally_ip, catch_binding_slot }`）
+  - 证据：`src/bytecode/compiler.rs` 编译 `Stmt::Throw` 为表达式求值 + `Opcode::Throw`，编译 `Stmt::Try` 时写入 `Chunk.protected_regions` 的 `try_start/try_end/handler_ip/finally_ip/catch_binding_slot`，并把 catch 入口降为栈顶异常绑定；`src/bytecode/interp.rs` 实现 `Opcode::Throw`，非 Error 抛值按树遍历语义包装为 runtime `Error` 并保留 `thrown`；新增单测 `bytecode::compiler::tests::compiles_throw_opcode`、`bytecode::compiler::tests::records_try_protected_region`、`bytecode::interp::tests::throw_opcode_wraps_non_error_value`；`cargo test --lib bytecode` 89 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
 - [ ] 6.2 Interp 抛错 unwind：沿帧栈查 region，命中跳 handler，否则向上
   - 证据：（待填）
 - [ ] 6.3 finally 语义：无论是否抛错都执行；finally 内 throw 覆盖原异常
@@ -277,10 +277,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口
-**下一条 TODO**：进入阶段 6，推进 6.1 `OpThrow` + `Chunk.protected_regions`
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6.1 `OpThrow` 与 `Chunk.protected_regions` 已完成
+**下一条 TODO**：继续阶段 6，推进 6.2 Interp 抛错 unwind：沿帧栈查 region，命中跳 handler，否则向上
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 5 已完成：对象/数组 opcode、类构建、`this`/`super`、computed key、对象模型 parity 门与覆盖度核对均已收口；最后验证沿用 5.5/5.6：`cargo test --lib bytecode` 86 passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed；下一步进入阶段 6 错误处理）
+**最后更新**：2026-06-22（阶段 6.1 已完成：`Stmt::Throw` 降为 `Opcode::Throw`，`Stmt::Try` 写入 `Chunk.protected_regions`，解释器 `Throw` 分支按树遍历语义包装抛值；验证 `cargo test --lib bytecode` 89 passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed；下一步实现 protected-region unwind）
 
 ---
 
