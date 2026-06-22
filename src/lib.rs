@@ -8,6 +8,7 @@
 
 pub mod apidoc;
 pub mod ast;
+pub mod bytecode;
 pub mod async_runtime;
 pub mod bundler;
 pub mod evaluator;

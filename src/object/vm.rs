@@ -5,7 +5,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::ast::Position;
@@ -30,11 +30,18 @@ pub type ImporterFn = dyn Fn(&EnvRef, &str) -> Result<Object, Object>;
 
 pub use super::value::EnvRef;
 
+/// Execution backend selection. 0 = tree-walker (default), 1 = bytecode VM.
+/// Stored as `AtomicU8` so the VM can be queried without borrowing.
+pub const EXEC_MODE_TREEWALK: u8 = 0;
+pub const EXEC_MODE_BYTECODE: u8 = 1;
+
 /// The runtime for one isolated script execution.
 pub struct VirtualMachine {
     globals: RefCell<HashMap<String, Object>>,
     pub argv: RefCell<Vec<String>>,
     pub type_check: AtomicBool,
+    /// Which execution backend to use. See `EXEC_MODE_*` constants.
+    pub exec_mode: AtomicU8,
     next_timer: AtomicI64,
     /// Pending async work counter; the host drains this before returning.
     async_pending: RefCell<usize>,
@@ -50,6 +57,7 @@ impl VirtualMachine {
             globals: RefCell::new(HashMap::new()),
             argv: RefCell::new(Vec::new()),
             type_check: AtomicBool::new(false),
+            exec_mode: AtomicU8::new(EXEC_MODE_TREEWALK),
             next_timer: AtomicI64::new(0),
             async_pending: RefCell::new(0),
             bootstrap_source: RefCell::new(String::new()),
