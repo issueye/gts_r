@@ -57,10 +57,17 @@ pub enum Opcode {
     StoreUpvalue = 45,
     /// Dynamic name lookup (migration scaffold; operand u16).
     LoadName = 46,
+    /// Store the top of the stack into a named binding. Operand u16; the high
+    /// bit (0x8000) marks a const declaration so the binding is created
+    /// const-tracked (assignment later raises TypeError).
+    StoreName = 47,
+    /// Assign to an *existing* binding (declaration already done). Pops the
+    /// value; raises ReferenceError if unbound or TypeError if const. Operand
+    /// u16 name index. The assigned value is also left on the stack (assignment
+    /// is an expression).
+    AssignName = 48,
     /// Push the current `this` binding.
-    LoadThis = 47,
-    /// Operand: u16 name index; super method dispatch.
-    SuperMethod = 48,
+    LoadThis = 49,
 
     // —— control flow ——
     /// Operand: u32 absolute ip.
@@ -69,6 +76,8 @@ pub enum Opcode {
     JumpIfTrue = 52,
     /// Backwards jump (loop bottom). Operand: u32 absolute ip.
     Loop = 53,
+    /// Operand: u16 name index; super method dispatch.
+    SuperMethod = 54,
 
     // —— functions / closures ——
     /// Operand: u16 proto index in the constant pool; binds upvalues at runtime.
@@ -134,12 +143,14 @@ impl Opcode {
             44 => Opcode::LoadUpvalue,
             45 => Opcode::StoreUpvalue,
             46 => Opcode::LoadName,
-            47 => Opcode::LoadThis,
-            48 => Opcode::SuperMethod,
+            47 => Opcode::StoreName,
+            48 => Opcode::AssignName,
+            49 => Opcode::LoadThis,
             50 => Opcode::Jump,
             51 => Opcode::JumpIfFalse,
             52 => Opcode::JumpIfTrue,
             53 => Opcode::Loop,
+            54 => Opcode::SuperMethod,
             60 => Opcode::Closure,
             61 => Opcode::Call,
             62 => Opcode::Return,
@@ -190,12 +201,14 @@ impl Opcode {
             Opcode::LoadUpvalue => "LOAD_UPVALUE",
             Opcode::StoreUpvalue => "STORE_UPVALUE",
             Opcode::LoadName => "LOAD_NAME",
+            Opcode::StoreName => "STORE_NAME",
+            Opcode::AssignName => "ASSIGN_NAME",
             Opcode::LoadThis => "LOAD_THIS",
-            Opcode::SuperMethod => "SUPER_METHOD",
             Opcode::Jump => "JUMP",
             Opcode::JumpIfFalse => "JUMP_IF_FALSE",
             Opcode::JumpIfTrue => "JUMP_IF_TRUE",
             Opcode::Loop => "LOOP",
+            Opcode::SuperMethod => "SUPER_METHOD",
             Opcode::Closure => "CLOSURE",
             Opcode::Call => "CALL",
             Opcode::Return => "RETURN",

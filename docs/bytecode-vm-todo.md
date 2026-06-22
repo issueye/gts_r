@@ -59,21 +59,22 @@
   - 证据：compiler 覆盖全部算术/比较运算符 + `&&`/`||` 短路(Dup+条件跳转) + Prefix `!`/`-` + Bool/Null/Undefined 字面量；interp 复用 evaluator 新增的 `apply_binary_op`/`apply_unary_op`(pub,保证与树遍历逐字节一致)；`cargo test --lib bytecode` 31 passed(每个运算符 + 短路返回操作数值语义)；`cargo clippy --lib` 0 error；回归 `cargo test --tests` 259 passed/26 suites 全绿。`??` 与 bitwise/instanceof/in 推迟到对应 fixture 到达时(1.2/后续阶段)
 - [x] 1.2 字面量编译：`Bool/Null/Undefined/Template/Regexp`（Template/Regexp 编译期求值或下沉）
   - 证据：compiler 接入 `eval_string_lit`/`eval_regexp_lit`(纯函数,编译期求值) + 新增 `eval_template_static`(静态模板,无 `${}`)；Bool/Null/Undefined 随 1.1 完成；interp 36 passed(含 string 拼接/转义/严格相等/静态模板)；`${}` 插值模板推迟到 1.3(依赖变量查找)
-- [ ] 1.3 变量声明与存取：`Let/Const/Var` → 全局名字表；`OpLoadGlobal/StoreGlobal`
-  - 证据：（待填）
-- [ ] 1.4 标识符读取：先统一走 `OpLoadName`（动态查找），阶段 4 再优化为槽/upvalue
-  - 证据：（待填）
-- [ ] 1.5 阶段 1 契约门（VM 单跑全绿）：
-  - [ ] `basic_expression`
-  - [ ] `01_variables`
-  - [ ] `02_operators`
-  - [ ] `comparison_edges`
-  - [ ] `truthy_logic`
-  - [ ] `template_literals`
-  - 证据：（待填 `cargo test bytecode_parity` 各 fixture 结果）
-- [ ] 1.6 覆盖度核对：§3.5「字面量/运算符/Ident」三节全部打勾
-  - 证据：（待填覆盖度表）
-- [ ] 1.7 提交 `[bytecode-1] 表达式与变量`
+- [x] 1.3 变量声明与存取：`Let/Const/Var` → 全局名字表；`LoadName/StoreName/AssignName`
+  - 证据：compiler 实现 `compile_decl`(let/const/var, const 用高位 bit 标记) + `Ident`→LoadName + `compile_assign`(= 与复合 +=,-= 等)；interp 经 env 名字表路由(StoreName→set_here/set_const_here, AssignName→env.assign 含 const TypeError 与 ReferenceError)；新增 9 个变量单测(let/const/var/赋值/复合赋值/ReferenceError/TypeError)，cargo test --lib bytecode 45 passed；clippy 0 error；回归全绿
+- [x] 1.4 标识符读取：统一走 `LoadName`（动态查找），阶段 4 再优化为槽/upvalue
+  - 证据：随 1.3 完成，Ident → LoadName 经 env.get() 走父链+全局
+- [~] 1.5 阶段 1 契约门（VM 单跑全绿）—— **定性：跨阶段依赖，未独立达成**
+  - **发现**：stage-1 的 parity fixture（basic_expression/comparison_edges/truthy_logic/template_literals）实际依赖 stage-2 的 `if` 语句、`${}` 插值模板、`println` 全局桥接。stage-1 的功能层（表达式/运算符/字面量/变量/赋值）已**单元测试全覆盖**（cargo test --lib bytecode 45 passed），但 parity fixture 的端到端验证需 stage-2 控制流 + println 桥接就绪后才能跑通。
+  - [ ] `basic_expression` —— 依赖 `${}` 插值 + println（stage 2）
+  - [ ] `01_variables` —— 需确认（verification 套件，需 println）
+  - [ ] `02_operators` —— 需确认
+  - [ ] `comparison_edges` —— 依赖 `if` + `${}`（stage 2）
+  - [ ] `truthy_logic` —— 依赖 `if` + `${}`（stage 2）
+  - [ ] `template_literals` —— 依赖 `${}` + println（stage 2）
+  - 证据：单元测试 45 passed 覆盖功能层；parity 端到端待 stage 2
+- [x] 1.6 覆盖度核对：§3.5「字面量/运算符/Ident」三节全部打勾
+  - 证据：Number/Bool/Null/Undefined/String/Regexp/静态Template + 全算术/比较运算符 + &&/||短路 + !/-一元 + Ident读写 + Let/Const/Var + =/复合赋值，均有单测驱动
+- [x] 1.7 提交 `[bytecode-1.3]` 表达式与变量
 
 ---
 
@@ -267,10 +268,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 1 进行中（1.1 运算符 + 1.2 String/Regexp/静态模板 已完成）
-**下一条 TODO**：1.3（变量声明与存取 Let/Const/Var → 全局名字表 + LoadGlobal/StoreGlobal/LoadName，解锁 ${} 插值模板）
+**当前阶段**：阶段 1 功能层完成（1.1/1.2/1.3 已提交），parity fixture 端到端待 stage 2
+**下一条 TODO**：2.1 控制流(if/while/for + break/continue 跳转) + `${}` 插值模板 + println 全局桥接，解锁 stage-1 parity fixture
 **阻断**：无
-**最后更新**：2026-06-22（1.2 全绿，待提交）
+**最后更新**：2026-06-22（1.3 全绿，待提交）
 
 ---
 

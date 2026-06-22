@@ -36,12 +36,55 @@ fn compile_stmt(stmt: &Stmt, chunk: &mut Chunk) -> Result<(), Object> {
             compile_expr(&e.expr, chunk)?;
             Ok(())
         }
+        Stmt::Let(s) => compile_decl(&s.name, s.value.as_ref(), false, s.pos.clone(), chunk),
+        Stmt::Var(s) => compile_decl(&s.name, s.value.as_ref(), false, s.pos.clone(), chunk),
+        Stmt::Const(s) => compile_decl(&s.name, s.value.as_ref(), true, s.pos.clone(), chunk),
         _ => Err(unsupported(stmt.pos(), &format!("statement {:?}", stmt))),
     }
 }
 
+/// Compile a `let`/`var`/`const` declaration.
+///
+/// Stage 1 keeps all variables in the (root) environment's name table, so a
+/// declaration evaluates its initializer (if any) and emits a STORE_NAME.
+/// `const` is recorded so a later assignment raises the matching TypeError;
+/// the const-ness is tracked by the environment binding, not the opcode.
+fn compile_decl(
+    name: &str,
+    value: Option<&Expr>,
+    is_const: bool,
+    pos: crate::ast::Position,
+    chunk: &mut Chunk,
+) -> Result<(), Object> {
+    if let Some(v) = value {
+        compile_expr(v, chunk)?;
+    } else {
+        // Declaration without initializer → undefined.
+        let idx = chunk.add_constant(Object::Undefined);
+        emit_const(chunk, idx, pos.clone());
+    }
+    let name_idx = chunk.add_constant(str_obj(name));
+    // Encode const-ness in the high bit of the name index operand so the
+    // interpreter knows which binding flavor to create. (Name pools stay
+    // small; a u16 with a flag bit is plenty.)
+    let operand = if is_const { name_idx | 0x8000 } else { name_idx };
+    chunk.write_op(Opcode::StoreName, pos.clone());
+    chunk.write_u16(operand, pos);
+    Ok(())
+}
+
 fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
     match expr {
+        // —— identifier read ——
+        Expr::Ident(i) => {
+            let name_idx = chunk.add_constant(str_obj(i.name.clone()));
+            chunk.write_op(Opcode::LoadName, i.pos.clone());
+            chunk.write_u16(name_idx, i.pos.clone());
+            Ok(())
+        }
+        // —— assignment `name = expr` (and compound `+=` etc.) ——
+        Expr::Assign(a) => compile_assign(a, chunk),
+
         // —— literals ——
         Expr::Number(n) => {
             let idx = chunk.add_constant(num_obj(n.value));
@@ -181,6 +224,49 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
     }
 }
 
+/// Compile an assignment expression.
+///
+/// Stage 1 supports `name = expr` and compound `name <op>= expr` for an
+/// identifier target. Member/index assignment is stage 5.
+fn compile_assign(a: &crate::ast::AssignExpr, chunk: &mut Chunk) -> Result<(), Object> {
+    let name = match &a.left {
+        Expr::Ident(i) => i.name.clone(),
+        _ => {
+            return Err(unsupported(
+                a.pos.clone(),
+                "assignment to non-identifier target",
+            ));
+        }
+    };
+    if a.op == "=" {
+        compile_expr(&a.right, chunk)?;
+        // DUP so the assigned value is both stored and left on the stack as
+        // the expression result (assignment evaluates to the value).
+        chunk.write_op(Opcode::Dup, a.pos.clone());
+        let name_idx = chunk.add_constant(str_obj(name));
+        chunk.write_op(Opcode::AssignName, a.pos.clone());
+        chunk.write_u16(name_idx, a.pos.clone());
+        Ok(())
+    } else {
+        // Compound: read current, combine with right, store.
+        // LOAD_NAME name ; <right> ; <op> ; DUP ; ASSIGN_NAME name
+        let name_idx_load = chunk.add_constant(str_obj(name.clone()));
+        chunk.write_op(Opcode::LoadName, a.pos.clone());
+        chunk.write_u16(name_idx_load, a.pos.clone());
+        compile_expr(&a.right, chunk)?;
+        // Strip the `=` suffix to get the binary op (`+=` → `+`).
+        let bin_op: String = a.op[..a.op.len() - 1].to_string();
+        let op = binary_opcode(&bin_op).ok_or_else(|| {
+            unsupported(a.pos.clone(), &format!("compound assignment `{}`", a.op))
+        })?;
+        chunk.write_op(op, a.pos.clone());
+        chunk.write_op(Opcode::Dup, a.pos.clone());
+        let name_idx_store = chunk.add_constant(str_obj(name));
+        chunk.write_op(Opcode::AssignName, a.pos.clone());
+        chunk.write_u16(name_idx_store, a.pos.clone());
+        Ok(())
+    }
+}
 /// Map a GTS infix operator string to its VM opcode. Returns `None` for
 /// operators not yet supported (bitwise, etc.) so the caller emits a clean
 /// compile error instead of broken bytecode.
@@ -340,11 +426,13 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_node() {
-        // `let` is stage 1; stage 0 must refuse rather than miscompile.
-        let lexer = Lexer::new("let x = 1");
+        // Function declarations are stage 3; the compiler must refuse rather
+        // than silently miscompile. (Previously this tested `let`, which is
+        // now supported in stage 1.3.)
+        let lexer = Lexer::new("function f() { return 1 }");
         let mut parser = Parser::new(lexer, "t.gs");
         let program = parser.parse_program();
         let result = compile(&program);
-        assert!(result.is_err(), "let should not compile at stage 0");
+        assert!(result.is_err(), "function decl should not compile before stage 3");
     }
 }

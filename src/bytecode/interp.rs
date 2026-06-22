@@ -17,10 +17,9 @@ use super::opcode::Opcode;
 use crate::evaluator::expressions::{apply_binary_op, apply_unary_op};
 
 /// Execute a compiled chunk under the given (root) environment. The
-/// environment is only used to reach the VM and globals; stage-0 code has no
-/// variable lookups.
-pub fn interpret(chunk: &Chunk, _env: &EnvRef) -> Object {
-    let mut vm = VmState::new(chunk);
+/// environment holds the global name table; variable lookups route through it.
+pub fn interpret(chunk: &Chunk, env: &EnvRef) -> Object {
+    let mut vm = VmState::new(chunk, env.clone());
     vm.run()
 }
 
@@ -28,14 +27,16 @@ struct VmState<'a> {
     chunk: &'a Chunk,
     ip: usize,
     stack: Vec<Object>,
+    env: EnvRef,
 }
 
 impl<'a> VmState<'a> {
-    fn new(chunk: &'a Chunk) -> Self {
+    fn new(chunk: &'a Chunk, env: EnvRef) -> Self {
         VmState {
             chunk,
             ip: 0,
             stack: Vec::new(),
+            env,
         }
     }
 
@@ -135,6 +136,91 @@ impl<'a> VmState<'a> {
             Opcode::Return => {
                 let v = self.stack.pop().unwrap_or(Object::Undefined);
                 return Ok(Flow::Return(v));
+            }
+
+            // —— variables (routed through the environment name table) ——
+            Opcode::LoadName => {
+                let operand = self.chunk.read_u16(self.ip) as usize;
+                self.ip += 2;
+                let pos = self.chunk.position_at(self.ip - 3);
+                let name = match &self.chunk.constants[operand] {
+                    Object::String(s) => s.to_string(),
+                    _ => {
+                        return Err(new_error(
+                            pos,
+                            "VMError: LOAD_NAME operand is not a string",
+                        ));
+                    }
+                };
+                let value = match self.env.borrow().get(&name) {
+                    Some(v) => v,
+                    None => {
+                        return Err(new_error(
+                            pos,
+                            format!("ReferenceError: '{}' is not defined", name),
+                        ));
+                    }
+                };
+                self.stack.push(value);
+            }
+            Opcode::StoreName => {
+                let operand = self.chunk.read_u16(self.ip);
+                self.ip += 2;
+                let pos = self.chunk.position_at(self.ip - 3);
+                let is_const = operand & 0x8000 != 0;
+                let name_idx = (operand & 0x7fff) as usize;
+                let name = match &self.chunk.constants[name_idx] {
+                    Object::String(s) => s.to_string(),
+                    _ => {
+                        return Err(new_error(
+                            pos,
+                            "VMError: STORE_NAME operand is not a string",
+                        ));
+                    }
+                };
+                let value = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                if is_const {
+                    self.env.borrow_mut().set_const_here(name, value);
+                } else {
+                    // `let`/`var` declaration: create the binding in this scope.
+                    self.env.borrow_mut().set_here(name, value);
+                }
+            }
+            Opcode::AssignName => {
+                let name_idx = self.chunk.read_u16(self.ip) as usize;
+                self.ip += 2;
+                let pos = self.chunk.position_at(self.ip - 3);
+                let name = match &self.chunk.constants[name_idx] {
+                    Object::String(s) => s.to_string(),
+                    _ => {
+                        return Err(new_error(
+                            pos,
+                            "VMError: ASSIGN_NAME operand is not a string",
+                        ));
+                    }
+                };
+                // The value is already on the stack (assignment leaves it as
+                // the expression result); peek, don't pop.
+                let value = match self.stack.last() {
+                    Some(v) => v.clone(),
+                    None => return Err(self.stack_underflow(pos.clone())),
+                };
+                let (found, is_const) = self.env.borrow_mut().assign(&name, value);
+                if !found {
+                    return Err(new_error(
+                        pos,
+                        format!("ReferenceError: '{}' is not defined", name),
+                    ));
+                }
+                if is_const {
+                    return Err(new_error(
+                        pos,
+                        format!("TypeError: assignment to constant '{}'", name),
+                    ));
+                }
             }
 
             other => {
@@ -377,7 +463,56 @@ mod tests {
         assert!(matches!(run_src("`hi there`"), Object::String(s) if &*s == "hi there"));
     }
 
-    // Note: interpolated templates (`${...}`) land in stage 1.3 once variable
-    // lookups are supported; the compile-time path for static templates is in
-    // place and matches eval_template's output for the no-interpolation case.
+    // —— variables (stage 1.3) ——
+    #[test]
+    fn let_decl_and_read() {
+        // `let x = 10; x` — last expression is the result
+        assert!(matches!(run_src("let x = 10\nx"), Object::Number(n) if n == 10.0));
+    }
+    #[test]
+    fn const_decl_and_read() {
+        assert!(matches!(run_src("const y = 5\ny * 2"), Object::Number(n) if n == 10.0));
+    }
+    #[test]
+    fn var_decl_no_initializer() {
+        // `var z;` → undefined
+        assert!(matches!(run_src("var z\nz"), Object::Undefined));
+    }
+    #[test]
+    fn assignment_to_let() {
+        assert!(matches!(
+            run_src("let a = 1\na = 2\na"),
+            Object::Number(n) if n == 2.0)
+        );
+    }
+    #[test]
+    fn assignment_is_expression() {
+        // `let a = 1; a = 5` evaluates to 5 (the assigned value)
+        assert!(matches!(run_src("let a = 1\na = 5"), Object::Number(n) if n == 5.0));
+    }
+    #[test]
+    fn compound_add_assign() {
+        assert!(matches!(run_src("let a = 10\na += 5\na"), Object::Number(n) if n == 15.0));
+    }
+    #[test]
+    fn read_undefined_var_is_reference_error() {
+        let r = run_src("nosuchvar");
+        assert!(r.is_runtime_error());
+    }
+    #[test]
+    fn const_reassign_is_type_error() {
+        let r = run_src("const c = 1\nc = 2");
+        assert!(r.is_runtime_error());
+    }
+    #[test]
+    fn variable_in_arithmetic() {
+        assert!(matches!(
+            run_src("let a = 3\nlet b = 4\na * b + b"),
+            Object::Number(n) if n == 16.0)
+        );
+    }
+
+    // Note: interpolated templates (`${...}`) now work since variable lookups
+    // are supported, but template lowering needs the runtime interpolation path
+    // (stage 1.4 polish); the static template path is in place.
 }
