@@ -604,6 +604,17 @@ impl<'a> VmState<'a> {
                     .ok_or_else(|| self.stack_underflow(pos.clone()))?;
                 return Err(throw_value(value, pos));
             }
+            Opcode::ThrowMatchError => {
+                let pos = self.chunk.position_at(instruction_ip);
+                let subject = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                return Err(new_error(
+                    pos,
+                    format!("MatchError: no arm matched for {}", subject.inspect()),
+                ));
+            }
 
             other => {
                 return Err(new_error(

@@ -201,8 +201,8 @@
 
 ## 阶段 7：Match 全集 + 类型注解
 
-- [ ] 7.1 Match 编译：scrutinee 求值 + 逐 arm 模式测试 + 命中跳转 + body + guard
-  - 证据：（待填）
+- [x] 7.1 Match 编译：scrutinee 求值 + 逐 arm 模式测试 + 命中跳转 + body + guard
+  - 证据：`src/bytecode/compiler.rs` 新增 `compile_match`，将 scrutinee 缓存到 VM 临时名后逐 arm 生成模式测试、命中跳转、guard 测试与 body 结果；`src/bytecode/opcode.rs`/`src/bytecode/interp.rs` 新增 `ThrowMatchError`，无 arm 命中时按树遍历消息生成 `MatchError: no arm matched for <subject>` 并走现有 protected-region catch；`tests/bytecode_parity.rs` 纳入 `match_basic`、`match_string`、`match_null`、`match_boolean`、`match_default_only`、`match_block_body`、`match_no_arm_catch`；`cargo fmt --all --check` passed；`cargo test --lib bytecode` 95 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
 - [ ] 7.2 5 种 Pattern：`Literal(Eq)/Ident(绑定)/Wildcard(无条件)/Or(任一)/Range(Ge+Le)`
   - 证据：（待填）
 - [ ] 7.3 `MatchBody::{Expr,Block}` + `guard`
@@ -278,10 +278,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口
-**下一条 TODO**：继续阶段 7，推进 7.1 Match 编译：scrutinee 求值 + 逐 arm 模式测试 + 命中跳转 + body + guard
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7.1 Match 主编译路径已完成
+**下一条 TODO**：继续阶段 7，推进 7.2 5 种 Pattern：`Literal(Eq)/Ident(绑定)/Wildcard(无条件)/Or(任一)/Range(Ge+Le)`
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 6.6 已完成：阶段 6 错误处理以 5 个提交收口；下一步进入阶段 7 Match 与类型注解）
+**最后更新**：2026-06-22（阶段 7.1 已完成：Match 主路径和现有 7 个 Match parity fixture 已通过；下一步补 Or/Range/guard 专项 fixture 并完成 7.2/7.3）
 
 ---
 

@@ -256,6 +256,34 @@ fn stage_1_3_fixtures() -> Vec<Fixture> {
             dir: "catch_finally_order",
             expected: "catch-finally-order=start:catch:finally\n",
         },
+        Fixture {
+            dir: "match_basic",
+            expected: "match-basic=two\n",
+        },
+        Fixture {
+            dir: "match_string",
+            expected: "match-string=go\n",
+        },
+        Fixture {
+            dir: "match_null",
+            expected: "match-null=nil\n",
+        },
+        Fixture {
+            dir: "match_boolean",
+            expected: "match-boolean=no\n",
+        },
+        Fixture {
+            dir: "match_default_only",
+            expected: "match-default-only=fallback\n",
+        },
+        Fixture {
+            dir: "match_block_body",
+            expected: "match-block-body=hit:6\n",
+        },
+        Fixture {
+            dir: "match_no_arm_catch",
+            expected: "match-no-arm-catch=MatchError\n",
+        },
     ]
 }
 

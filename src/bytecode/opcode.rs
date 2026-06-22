@@ -120,6 +120,8 @@ pub enum Opcode {
     /// Pop a value, convert to its string representation (Object::inspect),
     /// push the resulting string. Used for template-literal interpolation.
     ToString = 92,
+    /// Pop a match subject and throw `MatchError: no arm matched for <subject>`.
+    ThrowMatchError = 93,
 }
 
 impl Opcode {
@@ -186,6 +188,7 @@ impl Opcode {
             90 => Opcode::Throw,
             91 => Opcode::Await,
             92 => Opcode::ToString,
+            93 => Opcode::ThrowMatchError,
             _ => return None,
         })
     }
@@ -250,6 +253,7 @@ impl Opcode {
             Opcode::Throw => "THROW",
             Opcode::Await => "AWAIT",
             Opcode::ToString => "TO_STRING",
+            Opcode::ThrowMatchError => "THROW_MATCH_ERROR",
         }
     }
 }
