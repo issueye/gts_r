@@ -1004,6 +1004,43 @@ mod tests {
         interpret(&chunk, &env)
     }
 
+    fn run_src_tree_and_bytecode(src: &str) -> (Object, Object) {
+        let lexer = Lexer::new(src);
+        let mut parser = Parser::new(lexer, "t.gs");
+        let program = parser.parse_program();
+        assert!(
+            program.errors.is_empty(),
+            "parse errors: {:?}",
+            program.errors
+        );
+
+        let tree_vm = VirtualMachine::new();
+        register_globals(&tree_vm);
+        let tree_env = Environment::new_root(tree_vm);
+        let tree = crate::evaluator::eval_program(&program, &tree_env);
+
+        let chunk = compile(&program).expect("compile");
+        let vm = VirtualMachine::new();
+        let env = Environment::new_root(vm);
+        let bytecode = interpret(&chunk, &env);
+        (tree, bytecode)
+    }
+
+    fn assert_error_same(tree: Object, bytecode: Object) {
+        let Object::Error(tree) = tree else {
+            panic!("expected tree-walker error");
+        };
+        let Object::Error(bytecode) = bytecode else {
+            panic!("expected bytecode error");
+        };
+        let tree = tree.borrow();
+        let bytecode = bytecode.borrow();
+        assert_eq!(bytecode.name, tree.name);
+        assert_eq!(bytecode.message, tree.message);
+        assert_eq!(bytecode.stack, tree.stack);
+        assert_eq!(bytecode.pos, tree.pos);
+    }
+
     fn run_chunk(chunk: Chunk) -> Object {
         let vm = VirtualMachine::new();
         let env = Environment::new_root(vm);
@@ -1102,6 +1139,18 @@ mod tests {
             panic!("expected runtime error");
         };
         assert_eq!(data.borrow().message, "second");
+    }
+
+    #[test]
+    fn error_position_matches_treewalker_for_binary_type_error() {
+        let (tree, bytecode) = run_src_tree_and_bytecode("1 + true;");
+        assert_error_same(tree, bytecode);
+    }
+
+    #[test]
+    fn throw_position_matches_treewalker_for_non_error_value() {
+        let (tree, bytecode) = run_src_tree_and_bytecode("throw \"boom\";");
+        assert_error_same(tree, bytecode);
     }
 
     #[test]
