@@ -284,6 +284,22 @@ fn stage_1_3_fixtures() -> Vec<Fixture> {
             dir: "match_no_arm_catch",
             expected: "match-no-arm-catch=MatchError\n",
         },
+        Fixture {
+            dir: "match_or",
+            expected: "match-or=primary\n",
+        },
+        Fixture {
+            dir: "match_range",
+            expected: "match-range=medium\n",
+        },
+        Fixture {
+            dir: "match_guard",
+            expected: "match-guard=medium:6\n",
+        },
+        Fixture {
+            dir: "match_ident_binding",
+            expected: "match-ident-binding=id:gts\n",
+        },
     ]
 }
 
