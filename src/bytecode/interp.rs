@@ -12,6 +12,7 @@
 use crate::ast::{Position, TypeAnnotation, TypeKind};
 use crate::object::{
     new_error, new_named_error, str_obj, ArrayData, CallContext, EnvRef, HashData, Object,
+    PromiseState,
 };
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -208,6 +209,15 @@ impl<'a> VmState<'a> {
                     .ok_or_else(|| self.stack_underflow(pos.clone()))?;
                 self.stack
                     .push(str_obj(crate::evaluator::expressions::typeof_name(&v)));
+            }
+            Opcode::Await => {
+                let pos = self.chunk.position_at(self.ip - 1);
+                let value = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                let awaited = await_value(value, pos)?;
+                self.stack.push(awaited);
             }
             Opcode::ImportModule => {
                 let source_idx = self.chunk.read_u16(self.ip) as usize;
@@ -1192,12 +1202,36 @@ fn is_function_like(value: &Object) -> bool {
     )
 }
 
+fn await_value(value: Object, pos: Position) -> Result<Object, Object> {
+    match &value {
+        Object::Promise(promise) => {
+            let result = promise.wait();
+            if promise.state() == PromiseState::Rejected {
+                return Err(match &result {
+                    Object::Error(data) => {
+                        let mut error = data.borrow().clone();
+                        error.runtime = true;
+                        if error.pos.is_zero() {
+                            error.pos = pos;
+                        }
+                        Object::Error(Rc::new(RefCell::new(error)))
+                    }
+                    other => new_error(pos, other.inspect()),
+                });
+            }
+            Ok(result)
+        }
+        _ => Ok(value),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::bytecode::compile;
     use crate::lexer::Lexer;
     use crate::object::Environment;
+    use crate::object::Promise;
     use crate::object::VirtualMachine;
     use crate::parser::Parser;
     use std::sync::atomic::Ordering;
@@ -1227,6 +1261,16 @@ mod tests {
             program.errors
         );
         compile(&program).expect("compile")
+    }
+
+    fn run_src_with_globals(src: &str, globals: &[(&str, Object)]) -> Object {
+        let chunk = compile_src(src);
+        let vm = VirtualMachine::new();
+        for (name, value) in globals {
+            vm.set_global(*name, value.clone());
+        }
+        let env = Environment::new_root(vm);
+        interpret(&chunk, &env)
     }
 
     fn run_src_with_env(src: &str) -> (Object, EnvRef) {
@@ -1399,6 +1443,34 @@ mod tests {
             panic!("expected runtime error");
         };
         assert_eq!(data.borrow().message, "second");
+    }
+
+    #[test]
+    fn await_non_promise_returns_value() {
+        let result = run_src("await 42");
+        assert!(matches!(result, Object::Number(n) if n == 42.0));
+    }
+
+    #[test]
+    fn await_resolved_promise_returns_value() {
+        let promise = Promise::new();
+        promise.resolve(Object::Number(42.0));
+        let result = run_src_with_globals("await ready", &[("ready", Object::Promise(promise))]);
+        assert!(matches!(result, Object::Number(n) if n == 42.0));
+    }
+
+    #[test]
+    fn await_rejected_promise_returns_runtime_error() {
+        let promise = Promise::new();
+        promise.reject(str_obj("nope"));
+        let result = run_src_with_globals("await failed", &[("failed", Object::Promise(promise))]);
+        let Object::Error(data) = result else {
+            panic!("expected await rejection to become runtime error");
+        };
+        let data = data.borrow();
+        assert!(data.runtime);
+        assert_eq!(data.name, "Error");
+        assert_eq!(data.message, "nope");
     }
 
     #[test]

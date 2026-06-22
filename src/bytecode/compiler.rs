@@ -1069,6 +1069,11 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk, resolutions: &ResolutionMap) -> 
             compile_template_interpolated(t, chunk, resolutions)
         }
         Expr::Match(m) => compile_match(m, chunk, resolutions),
+        Expr::Await(a) => {
+            compile_expr(&a.value, chunk, resolutions)?;
+            chunk.write_op(Opcode::Await, a.pos.clone());
+            Ok(())
+        }
         Expr::Array(a) => {
             if a.elements
                 .iter()
@@ -1859,6 +1864,13 @@ mod tests {
         let chunk = compile_src("throw \"boom\";");
         let spine = decode_opcode_spine(&chunk);
         assert!(spine.contains(&Opcode::Throw));
+    }
+
+    #[test]
+    fn compiles_await_opcode() {
+        let chunk = compile_src("await value;");
+        let spine = decode_opcode_spine(&chunk);
+        assert!(spine.contains(&Opcode::Await));
     }
 
     #[test]
