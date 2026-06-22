@@ -276,7 +276,8 @@
   - 证据：`Session::new()` 与 `Session::with_tokio()` 创建 VM 后立即写入 `EXEC_MODE_BYTECODE`，使默认会话走字节码后端；CLI 新增 `--exec-mode bytecode|tree` / `--exec-mode=bytecode|tree`，默认 `bytecode`，并在运行脚本前按 flag 覆盖 `session.vm().exec_mode`，保留树遍历 legacy fallback；新增 `tests/bytecode_default.rs::session_new_defaults_to_bytecode_exec_mode` 断言默认 Session 为 Bytecode；新增 `tests/cli_flags.rs::cli_exec_mode_tree_keeps_treewalker_fallback` 用当前 VM 尚不支持的 `??` 表达式验证 `--exec-mode=tree` 仍可走树遍历并输出 `tree=42`；验证：`cargo fmt --all --check` passed、`cargo test --test bytecode_default -- --nocapture` 1 passed、`cargo test --test cli_flags cli_exec_mode_tree_keeps_treewalker_fallback -- --nocapture` 1 passed、`cargo test --test bytecode_parity -- --nocapture` passed、`cargo test --test bytecode_verification -- --nocapture` passed、`cargo test --test bytecode_modules -- --nocapture` passed、`cargo test --test bytecode_async -- --nocapture` passed
 - [x] 10.6 决定：树遍历保留 legacy fallback 还是移除（本阶段只决定）
   - 证据：决定 **暂时保留树遍历作为 legacy fallback**，移除动作另立后续 PR；理由：阶段 10 计划明确要求本阶段只做决策且 `Session::new()` 默认切到 Bytecode 后仍保留 `--exec-mode=tree` flag；当前 VM 终验门（parity/verification/modules/async/perf）已支持默认切换，但仍存在非门控语法缺口，例如 `src/bytecode/compiler.rs` 对 `??` 仍返回 unsupported，而树遍历在 `src/evaluator/expressions.rs` 已支持 `??`，10.5 新增的 `tests/cli_flags.rs::cli_exec_mode_tree_keeps_treewalker_fallback` 正是用 `null ?? 42` 证明 fallback 可用；因此本阶段选择“默认 Bytecode + 显式 tree fallback”以降低兼容性风险，后续移除前需至少补齐已知 fallback-only 语法（含 `??`）、增加 CLI 迁移说明，并另设删除树遍历 evaluator/flag 的独立验收门。
-- [ ] 10.7 提交 `[bytecode-10] 全量交付与默认切换`
+- [x] 10.7 提交 `[bytecode-10] 全量交付与默认切换`
+  - 证据：阶段 10 已拆分为单职责提交完成：`276b23c test(bytecode): run all parity fixtures`（10.1）、`11a16f2 test(bytecode): validate verification suites`（10.2）、`c2729d5 test(bytecode): audit compiler coverage`（10.3）、`e1e658d test(bytecode): add bench server performance gate`（10.4）、`cf2060e feat(bytecode): default sessions to bytecode`（10.5）、`72eabb9 docs(bytecode): keep treewalker fallback`（10.6）；终验覆盖 REQ-1/REQ-2/REQ-3、性能门、默认 Bytecode 切换与 legacy fallback 决策；阶段 10 收口提交记录当前项。
 
 ---
 
@@ -285,9 +286,9 @@
 > **续工时从这里开始。**
 
 **当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7 Match 全集与类型注解已完成并收口；阶段 8 模块系统全集已完成并收口；阶段 9 异步全集已完成并收口
-**下一条 TODO**：继续阶段 10，推进 10.7 提交 `[bytecode-10] 全量交付与默认切换`
+**下一条 TODO**：阶段 10 已完成；后续若继续推进，建议另立后续项补齐 fallback-only 语法（例如 `??`）并规划树遍历下线 PR
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 10.6 已完成：决定暂时保留树遍历 legacy fallback，移除动作另立后续 PR；下一步推进 10.7 阶段 10 收口提交）
+**最后更新**：2026-06-22（阶段 10.7 已完成：阶段 10 全量交付与默认切换收口；后续建议另立 tree fallback 下线/补齐 PR）
 
 ---
 
