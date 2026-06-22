@@ -63,7 +63,7 @@ pub fn register_globals(vm: &Rc<VirtualMachine>) {
         let n = name.to_string();
         let f: FnPtr = Rc::new(move |_ctx, args| {
             let message = args.first().map(|a| a.inspect()).unwrap_or_default();
-            new_named_error(crate::ast::Position::default(), &n, message)
+            new_error_object(crate::ast::Position::default(), &n, message)
         });
         vm.set_global(
             name,

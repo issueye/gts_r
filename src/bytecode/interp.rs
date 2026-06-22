@@ -140,12 +140,20 @@ impl<'a> VmState<'a> {
             Opcode::Div => self.bin_op("/")?,
             Opcode::Mod => self.bin_op("%")?,
             Opcode::Pow => self.bin_op("**")?,
+            Opcode::BitAnd => self.bin_op("&")?,
+            Opcode::BitOr => self.bin_op("|")?,
+            Opcode::BitXor => self.bin_op("^")?,
+            Opcode::Shl => self.bin_op("<<")?,
+            Opcode::Shr => self.bin_op(">>")?,
+            Opcode::UShr => self.bin_op(">>>")?,
             Opcode::Eq => self.bin_op("===")?,
             Opcode::Neq => self.bin_op("!==")?,
             Opcode::Lt => self.bin_op("<")?,
             Opcode::Le => self.bin_op("<=")?,
             Opcode::Gt => self.bin_op(">")?,
             Opcode::Ge => self.bin_op(">=")?,
+            Opcode::InstanceOf => self.bin_op("instanceof")?,
+            Opcode::In => self.bin_op("in")?,
             // Concat is a specialised `+` for the string-only fast path; route
             // through the same core so semantics stay identical.
             Opcode::Concat => self.bin_op("+")?,
@@ -153,6 +161,7 @@ impl<'a> VmState<'a> {
             // —— unary operators ——
             Opcode::Not => self.un_op("!")?,
             Opcode::Neg => self.un_op("-")?,
+            Opcode::BitNot => self.un_op("~")?,
 
             // —— control flow ——
             Opcode::Jump => {
@@ -1015,6 +1024,20 @@ impl<'a> VmState<'a> {
             Object::Builtin(b) => {
                 crate::evaluator::methods::construct_builtin(&b, &self.env, &args, pos.clone())
             }
+            Object::Function(f) => crate::evaluator::expressions::apply_function(
+                &Object::Function(f),
+                &self.env,
+                &args,
+                None,
+                pos.clone(),
+            ),
+            Object::Hash(_) => crate::evaluator::expressions::apply_function(
+                &callee,
+                &self.env,
+                &args,
+                None,
+                pos.clone(),
+            ),
             other => {
                 return Err(new_error(
                     pos,
@@ -1730,6 +1753,22 @@ mod tests {
     #[test]
     fn arithmetic_pow() {
         assert!(matches!(run_src("2 ** 10"), Object::Number(n) if n == 1024.0));
+    }
+    #[test]
+    fn bitwise_operators_match_treewalker_core() {
+        assert!(matches!(run_src("(5 & 3) + (5 | 3) + (5 ^ 3)"), Object::Number(n) if n == 14.0));
+        assert!(matches!(run_src("(~5) + (5 << 1) + (5 >> 1)"), Object::Number(n) if n == 6.0));
+    }
+    #[test]
+    fn object_has_own_property_checks_direct_entries() {
+        assert!(matches!(
+            run_src("let obj = { city: \"Paris\" }; obj.hasOwnProperty(\"city\")"),
+            Object::Boolean(true)
+        ));
+        assert!(matches!(
+            run_src("let obj = { city: \"Paris\" }; obj.hasOwnProperty(\"name\")"),
+            Object::Boolean(false)
+        ));
     }
     #[test]
     fn precedence_mul_before_add() {

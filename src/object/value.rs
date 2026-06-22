@@ -507,6 +507,23 @@ pub fn new_named_error(
     name: impl Into<String>,
     message: impl Into<String>,
 ) -> Object {
+    new_named_error_with_runtime(pos, name, message, true)
+}
+
+pub fn new_error_object(
+    pos: Position,
+    name: impl Into<String>,
+    message: impl Into<String>,
+) -> Object {
+    new_named_error_with_runtime(pos, name, message, false)
+}
+
+fn new_named_error_with_runtime(
+    pos: Position,
+    name: impl Into<String>,
+    message: impl Into<String>,
+    runtime: bool,
+) -> Object {
     let name = name.into();
     let message = message.into();
     let stack = if pos.is_zero() {
@@ -518,7 +535,7 @@ pub fn new_named_error(
         message,
         name,
         stack,
-        runtime: true,
+        runtime,
         pos,
         thrown: None,
     })))

@@ -22,6 +22,25 @@ pub fn get_property(obj: &Object, name: &str, pos: Position) -> Object {
                 drop(hb);
                 return get_property(&proto, name, pos);
             }
+            if name == "hasOwnProperty" {
+                let target = Object::Hash(h.clone());
+                return native_builtin(
+                    "Object.hasOwnProperty",
+                    move |ctx, args| {
+                        let Some(key) = args.first() else {
+                            return Object::Boolean(false);
+                        };
+                        let receiver = ctx.receiver.as_ref().unwrap_or(&target);
+                        match receiver {
+                            Object::Hash(hash) => {
+                                Object::Boolean(hash.borrow().contains(&key.inspect()))
+                            }
+                            _ => Object::Boolean(false),
+                        }
+                    },
+                    Some(Object::Hash(h.clone())),
+                );
+            }
             Object::Undefined
         }
         Object::Instance(i) => {

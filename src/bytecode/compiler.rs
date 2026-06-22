@@ -1144,8 +1144,9 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk, resolutions: &ResolutionMap) -> 
             let op = match p.op.as_str() {
                 "!" => Opcode::Not,
                 "-" => Opcode::Neg,
+                "~" => Opcode::BitNot,
                 "typeof" => Opcode::TypeOf,
-                "+" | "void" | "~" => {
+                "+" | "void" => {
                     return Err(unsupported(
                         p.pos.clone(),
                         &format!("prefix operator `{}`", p.op),
@@ -1697,13 +1698,20 @@ fn binary_opcode(op: &str) -> Option<Opcode> {
         "/" => Opcode::Div,
         "%" => Opcode::Mod,
         "**" => Opcode::Pow,
+        "&" => Opcode::BitAnd,
+        "|" => Opcode::BitOr,
+        "^" => Opcode::BitXor,
+        "<<" => Opcode::Shl,
+        ">>" => Opcode::Shr,
+        ">>>" => Opcode::UShr,
         "===" => Opcode::Eq,
         "!==" => Opcode::Neq,
         "<" => Opcode::Lt,
         "<=" => Opcode::Le,
         ">" => Opcode::Gt,
         ">=" => Opcode::Ge,
-        // Bitwise / `instanceof` / `in` arrive with their own fixtures later.
+        "instanceof" => Opcode::InstanceOf,
+        "in" => Opcode::In,
         _ => return None,
     })
 }

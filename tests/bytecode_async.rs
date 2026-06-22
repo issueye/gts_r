@@ -110,6 +110,29 @@ fn bytecode_matches_tree_for_promise_chains() {
 }
 
 #[test]
+fn bytecode_matches_tree_for_promise_constructor() {
+    assert_tree_and_bytecode_match(
+        "promise constructor",
+        r#"
+        let constructed = await new Promise((resolve) => {
+            resolve(42);
+        });
+        let chained = await new Promise((resolve) => {
+            resolve(constructed);
+        }).then((value) => {
+            return value * 2;
+        });
+        let recovered = await new Promise((_resolve, reject) => {
+            reject(new Error("bad"));
+        }).catch((err) => {
+            return `caught:${err.message}`;
+        });
+        print(`promise-new=${constructed}:${chained}:${recovered}`);
+        "#,
+    );
+}
+
+#[test]
 fn bytecode_matches_tree_for_async_functions_arrows_and_methods() {
     assert_tree_and_bytecode_match(
         "async function forms",
