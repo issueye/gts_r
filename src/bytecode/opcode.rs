@@ -125,6 +125,8 @@ pub enum Opcode {
     ToString = 92,
     /// Pop a match subject and throw `MatchError: no arm matched for <subject>`.
     ThrowMatchError = 93,
+    /// Pop a value and push its `typeof` string.
+    TypeOf = 94,
 }
 
 impl Opcode {
@@ -193,6 +195,7 @@ impl Opcode {
             91 => Opcode::Await,
             92 => Opcode::ToString,
             93 => Opcode::ThrowMatchError,
+            94 => Opcode::TypeOf,
             _ => return None,
         })
     }
@@ -259,6 +262,7 @@ impl Opcode {
             Opcode::Await => "AWAIT",
             Opcode::ToString => "TO_STRING",
             Opcode::ThrowMatchError => "THROW_MATCH_ERROR",
+            Opcode::TypeOf => "TYPEOF",
         }
     }
 }

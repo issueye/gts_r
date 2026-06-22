@@ -1013,16 +1013,8 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk, resolutions: &ResolutionMap) -> 
             let op = match p.op.as_str() {
                 "!" => Opcode::Not,
                 "-" => Opcode::Neg,
-                // `+`/`typeof`/`void`/`~` are valid prefix ops in the
-                // tree-walker; route them through a generic unary dispatch
-                // keyed by op string (carried in the constant pool).
-                "+" | "typeof" | "void" | "~" => {
-                    let op_idx = chunk.add_constant(str_obj(p.op.clone()));
-                    chunk.write_op(Opcode::Not, p.pos.clone()); // placeholder
-                    chunk.write_u16(op_idx, p.pos.clone());
-                    // NOTE: replaced by a dedicated UnaryOp path in stage 1.2.
-                    // For stage 1.1 only `!` and `-` are exercised by fixtures.
-                    let _ = op_idx;
+                "typeof" => Opcode::TypeOf,
+                "+" | "void" | "~" => {
                     return Err(unsupported(
                         p.pos.clone(),
                         &format!("prefix operator `{}`", p.op),
@@ -1726,7 +1718,7 @@ mod tests {
     #[test]
     fn rejects_unsupported_node() {
         // Unsupported nodes must be refused rather than silently miscompiled.
-        let lexer = Lexer::new("typeof value");
+        let lexer = Lexer::new("void value");
         let mut parser = Parser::new(lexer, "t.gs");
         let program = parser.parse_program();
         let result = compile(&program);

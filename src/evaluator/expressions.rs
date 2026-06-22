@@ -147,7 +147,9 @@ pub fn typeof_name(value: &Object) -> String {
         Object::Boolean(_) => "boolean".into(),
         Object::Number(_) => "number".into(),
         Object::String(_) => "string".into(),
-        Object::Function(_) | Object::Builtin(_) | Object::Class(_) => "function".into(),
+        Object::Function(_) | Object::Builtin(_) | Object::Class(_) | Object::Closure(_) => {
+            "function".into()
+        }
         _ => "object".into(),
     }
 }

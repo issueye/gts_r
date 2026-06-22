@@ -200,6 +200,15 @@ impl<'a> VmState<'a> {
                 // Mirror the tree-walker's template interpolation (inspect()).
                 self.stack.push(str_obj(v.inspect()));
             }
+            Opcode::TypeOf => {
+                let pos = self.chunk.position_at(self.ip - 1);
+                let v = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                self.stack
+                    .push(str_obj(crate::evaluator::expressions::typeof_name(&v)));
+            }
             Opcode::Call => {
                 let encoded_arg_count = self.chunk.read_u16(self.ip);
                 let has_this_receiver = encoded_arg_count & 0x8000 != 0;

@@ -300,6 +300,10 @@ fn stage_1_3_fixtures() -> Vec<Fixture> {
             dir: "match_ident_binding",
             expected: "match-ident-binding=id:gts\n",
         },
+        Fixture {
+            dir: "typeof_values",
+            expected: "typeof-values=number:string:boolean:object:undefined:object:object:function:function\n",
+        },
     ]
 }
 

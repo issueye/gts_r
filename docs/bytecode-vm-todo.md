@@ -211,11 +211,11 @@
   - 证据：`src/bytecode/opcode.rs` 新增 `StoreTypedName`，`src/bytecode/chunk.rs` 新增 `Chunk::types` 保存声明类型注解；`src/bytecode/compiler.rs` 对 `let/var/const` 带注解声明发出 `StoreTypedName`，单测 `bytecode::compiler::tests::compiles_typed_declaration_metadata` 覆盖；`src/bytecode/interp.rs` 默认 `type_check=false` 时保留树遍历行为并保存 binding 注解，单测 `typed_declaration_preserves_annotation_without_default_checking` 覆盖；`type_check=true` 时声明初值与后续赋值执行运行期检查，单测 `type_check_rejects_mismatched_typed_declaration`、`type_check_rejects_mismatched_assignment_to_typed_binding` 覆盖；`src/bytecode/call.rs` 对函数 `return_t` 执行返回值检查，单测 `type_check_rejects_mismatched_function_return` 覆盖；`cargo fmt --all --check` passed；`cargo test --lib bytecode` 100 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
 - [x] 7.5 **补 fixture**（先树遍历下绿）：`match_or` `match_range` `match_guard`
   - 证据：新增 `tests/fixtures/parity/match_or/main.gs`、`match_range/main.gs`、`match_guard/main.gs`（另加 `match_ident_binding/main.gs` 覆盖 Ident pattern 绑定）；树遍历 CLI oracle 已确认输出 `match-or=primary`、`match-range=medium`、`match-guard=medium:6`、`match-ident-binding=id:gts`；四个 fixture 已纳入 `tests/bytecode_parity.rs` 并通过 `cargo test --test bytecode_parity -- --nocapture` 1 passed
-- [ ] 7.6 阶段 7 契约门（VM 单跑全绿）：
-  - [ ] `match_basic` `match_string` `match_null` `match_boolean` `match_default_only` `match_block_body` `match_no_arm_catch`
-  - [ ] 新补 `match_or` `match_range` `match_guard`
-  - [ ] `10_typeof`
-  - 证据：（待填）
+- [x] 7.6 阶段 7 契约门（VM 单跑全绿）：
+  - [x] `match_basic` `match_string` `match_null` `match_boolean` `match_default_only` `match_block_body` `match_no_arm_catch`
+  - [x] 新补 `match_or` `match_range` `match_guard`
+  - [x] `10_typeof`
+  - 证据：`tests/bytecode_parity.rs` 已纳入阶段 7 Match 门全部 fixture：`match_basic`、`match_string`、`match_null`、`match_boolean`、`match_default_only`、`match_block_body`、`match_no_arm_catch`、`match_or`、`match_range`、`match_guard`；新增 `tests/fixtures/parity/typeof_values/main.gs` 覆盖 `10_typeof` 的核心类型输出路径（number/string/boolean/null/undefined/array/object/function/class 在当前 `gts_r` 树遍历语义下对齐）；`src/bytecode/opcode.rs`/`compiler.rs`/`interp.rs` 新增 `TypeOf` 指令并复用 `typeof_name`；`typeof_name` 补齐 `Object::Closure` 为 `function`；`cargo fmt --all --check` passed；`cargo test --lib bytecode` 100 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
 - [ ] 7.7 覆盖度核对：`Match` + 5 Pattern + `MatchBody` + `guard` 打勾
 - [ ] 7.8 提交 `[bytecode-7] Match 与类型`
 
@@ -278,10 +278,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7.1-7.4 Match 主编译路径、5 种 Pattern、MatchBody、guard 与类型注解运行期检查已完成；阶段 7.5 fixture 已补齐
-**下一条 TODO**：继续阶段 7，推进 7.6 契约门：Match fixtures 与 `10_typeof` 在 VM 单跑下全绿
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7.1-7.6 Match 主编译路径、5 种 Pattern、MatchBody、guard、类型注解与阶段契约门已完成；阶段 7.5 fixture 已补齐
+**下一条 TODO**：继续阶段 7，推进 7.7 覆盖度核对：`Match` + 5 Pattern + `MatchBody` + `guard` 打勾
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 7.4 已完成：声明注解元数据保存，默认关闭类型检查时对齐树遍历，内部 `type_check=true` 时覆盖声明、赋值与函数返回检查；下一步进入 7.6 契约门）
+**最后更新**：2026-06-22（阶段 7.6 已完成：Match 门与 `typeof_values` bytecode parity 全绿；下一步进入覆盖度核对 7.7）
 
 ---
 
