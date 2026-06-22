@@ -54,6 +54,7 @@ pub(crate) fn interpret_with_upvalues(
 struct VmState<'a> {
     chunk: &'a Chunk,
     ip: usize,
+    last_ip: usize,
     stack: Vec<Object>,
     env: EnvRef,
     open_upvalues: BTreeMap<usize, Vec<Rc<Upvalue>>>,
@@ -65,6 +66,7 @@ impl<'a> VmState<'a> {
         VmState {
             chunk,
             ip: 0,
+            last_ip: 0,
             stack: Vec::with_capacity(256),
             env,
             open_upvalues: BTreeMap::new(),
@@ -84,7 +86,12 @@ impl<'a> VmState<'a> {
             match self.step() {
                 Ok(Flow::Continue) => {}
                 Ok(Flow::Return(v)) => return v,
-                Err(e) => return e,
+                Err(e) => {
+                    if self.unwind_to_handler(e.clone()) {
+                        continue;
+                    }
+                    return e;
+                }
             }
         }
     }
@@ -92,6 +99,8 @@ impl<'a> VmState<'a> {
     /// Decode and execute one instruction. Returning `Result` lets opcode
     /// handlers use `?` for error propagation; `run` translates the outcomes.
     fn step(&mut self) -> Result<Flow, Object> {
+        let instruction_ip = self.ip;
+        self.last_ip = instruction_ip;
         let byte = self.chunk.code[self.ip];
         let op = match Opcode::from_byte(byte) {
             Some(op) => op,
@@ -588,7 +597,7 @@ impl<'a> VmState<'a> {
                 }
             }
             Opcode::Throw => {
-                let pos = self.chunk.position_at(self.ip - 1);
+                let pos = self.chunk.position_at(instruction_ip);
                 let value = self
                     .stack
                     .pop()
@@ -716,6 +725,27 @@ impl<'a> VmState<'a> {
                 }
             }
         }
+    }
+
+    fn unwind_to_handler(&mut self, error: Object) -> bool {
+        let Some(region) = self
+            .chunk
+            .protected_regions
+            .iter()
+            .filter(|region| {
+                let fault_ip = self.last_ip as u32;
+                region.try_start <= fault_ip
+                    && fault_ip < region.try_end
+                    && region.handler_ip > region.try_end
+            })
+            .max_by_key(|region| region.try_start)
+        else {
+            return false;
+        };
+
+        self.stack.push(catch_value(error));
+        self.ip = region.handler_ip as usize;
+        true
     }
 
     fn read_string_const(
@@ -865,6 +895,17 @@ fn throw_value(value: Object, pos: Position) -> Object {
     }
 }
 
+fn catch_value(value: Object) -> Object {
+    match value {
+        Object::Error(e) => {
+            let mut data = e.borrow_mut().clone();
+            data.runtime = false;
+            Object::Error(Rc::new(RefCell::new(data)))
+        }
+        other => other,
+    }
+}
+
 /// One-step control-flow outcome.
 enum Flow {
     Continue,
@@ -993,6 +1034,23 @@ mod tests {
         assert_eq!(data.name, "Error");
         assert_eq!(data.message, "boom");
         assert!(matches!(data.thrown.as_ref(), Some(Object::String(s)) if s.as_ref() == "boom"));
+    }
+
+    #[test]
+    fn try_catch_unwinds_to_handler() {
+        let result = run_src(
+            r#"
+            let label = "none";
+            try {
+                throw "boom";
+                label = "miss";
+            } catch (err) {
+                label = err.message;
+            }
+            label;
+            "#,
+        );
+        assert!(matches!(result, Object::String(s) if s.as_ref() == "boom"));
     }
 
     #[test]
