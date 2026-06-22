@@ -249,12 +249,12 @@
   - 证据：`src/bytecode/compiler.rs` 已将 async `FuncDecl`/`FuncExpr`/`Arrow` 与类 `Method` 的 `is_async` 写入 `FunctionProto`，新增单测 `records_async_function_proto`、`records_async_arrow_proto` 覆盖函数与箭头元数据；`src/parser/expressions.rs` 修正 `async (value) => ...` 保留 async 标记；`src/bytecode/call.rs` 对 async bytecode closure 返回 fulfilled/rejected `Promise`，参数绑定失败、运行期错误与返回类型错误均转 rejected Promise；`src/bytecode/interp.rs` 新增 `async_function_call_returns_resolved_promise`、`async_arrow_can_be_awaited`、`async_method_can_be_awaited` 覆盖 async 函数/箭头/方法三路；验证：`cargo fmt --all --check` passed、`cargo test --lib bytecode` 117 passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed、`cargo test --test bytecode_modules -- --nocapture` 2 passed
 - [x] 9.3 接线 `async_runtime/awaitable_bridge.rs` + `object/event_loop.rs`（复用，不改）
   - 证据：核对 `src/async_runtime/awaitable_bridge.rs` 当前设计为 Tokio 与 GTS 单线程 Awaitable 不做直接转换、仅提供线程边界辅助；`src/object/event_loop.rs` 已可直接轮询 `Awaitable` 并处理 `Ready/Rejected/Pending`；新增 `bytecode_frame_awaitable_runs_on_event_loop` 证明 `BytecodeFrameAwaitable` 可交给现有 `EventLoop::run` 执行到 `Ready`，未改 `awaitable_bridge.rs` 与 `object/event_loop.rs` 本体；验证：`cargo fmt --all --check` passed、`cargo test --lib bytecode::awaitable` 2 passed、`cargo test --lib object::event_loop` 3 passed、`cargo test --lib bytecode` 118 passed、`cargo test --features tokio --lib async_runtime::awaitable_bridge` 3 passed
-- [ ] 9.4 阶段 9 契约门（VM 单跑全绿）：
-  - [ ] `11_promises` `12_async_await`
-  - [ ] Promise.all/race/resolve/reject 时序一致
-  - [ ] async 内 try/catch 捕获 await 抛错一致
-  - [ ] setTimeout/setInterval 一致
-  - 证据：（待填）
+- [x] 9.4 阶段 9 契约门（VM 单跑全绿）：
+  - [x] `11_promises` `12_async_await`
+  - [x] Promise.all/race/resolve/reject 时序一致
+  - [x] async 内 try/catch 捕获 await 抛错一致
+  - [x] setTimeout/setInterval 一致
+  - 证据：新增 `tests/bytecode_async.rs`，同一脚本分别以 `EXEC_MODE_TREEWALK` 与 `EXEC_MODE_BYTECODE` 运行并逐字节比较 `result.inspect()` 与 stdout；覆盖 Promise 静态 `resolve/reject/all/race`、Promise `then/catch/finally` 链、async function/arrow/class method、async 内 `try/catch` 捕获 `await Promise.reject(...)`、`setTimeout(0)`/`sleepAsync(0)`/`setInterval(0)`；验证：`cargo fmt --all --check` passed、`cargo test --test bytecode_async -- --nocapture` 4 passed、`cargo test --lib bytecode` 118 passed
 - [ ] 9.5 覆盖度核对：`Await` + async `FuncDecl/Method/Arrow` 打勾
 - [ ] 9.6 提交 `[bytecode-9] 异步`
 
@@ -282,10 +282,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7 Match 全集与类型注解已完成并收口；阶段 8 模块系统全集已完成并收口；阶段 9.1 `OpAwait` 与 `BytecodeFrameAwaitable` 已完成；阶段 9.2 async 函数/方法/箭头 Promise 返回已完成；阶段 9.3 async runtime/EventLoop 复用接线已完成
-**下一条 TODO**：继续阶段 9，推进 9.4 阶段 9 契约门（Promise/async-await VM 单跑）
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7 Match 全集与类型注解已完成并收口；阶段 8 模块系统全集已完成并收口；阶段 9.1 `OpAwait` 与 `BytecodeFrameAwaitable` 已完成；阶段 9.2 async 函数/方法/箭头 Promise 返回已完成；阶段 9.3 async runtime/EventLoop 复用接线已完成；阶段 9.4 Promise/async-await 契约门已完成
+**下一条 TODO**：继续阶段 9，推进 9.5 覆盖度核对（`Await` + async `FuncDecl/Method/Arrow`）
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 9.3 已完成：BytecodeFrameAwaitable 可由现有 EventLoop 执行，Tokio bridge 保持线程边界辅助设计；下一步推进 Promise/async-await 契约门）
+**最后更新**：2026-06-22（阶段 9.4 已完成：新增 bytecode_async 契约测试，Promise 静态/链式、async 三种形态、await reject 捕获与 timer 语义对齐；下一步推进 async 覆盖度核对）
 
 ---
 
