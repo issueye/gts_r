@@ -1,31 +1,32 @@
-//! End-to-end parity check: run selected fixtures under the bytecode VM and
-//! compare against the expected stdout recorded in `parity_compat.rs`.
+//! End-to-end parity check: run all parity fixtures under the bytecode runtime
+//! and compare against the expected stdout recorded in `parity_compat.rs`.
 //!
 //! We stub the global `println` with a capturing closure so we can assert the
 //! exact output without depending on process stdout capture. `print` is
 //! similarly captured (no trailing newline).
 
 use std::cell::RefCell;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::Ordering;
 
-use gts::bytecode::{compile, interpret};
-use gts::lexer::Lexer;
-use gts::object::{Environment, Object, VirtualMachine};
-use gts::parser::Parser;
+use gts::object::{Builtin, Object, EXEC_MODE_BYTECODE};
+use gts::runtime::Session;
 
-/// Run `src` under the bytecode VM with a capturing `println`/`print`, and
-/// return the concatenated captured output.
-fn run_vm_capturing(src: &str) -> String {
+/// Run a fixture through the bytecode runtime with capturing `println`/`print`.
+fn run_fixture_capturing(dir: &str) -> String {
     let captured: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
     let captured_fn = captured.clone();
     let captured_print = captured.clone();
 
-    let vm = VirtualMachine::new();
-    // Register the full global set first (Math, JSON, console, ...), then
-    // override println/print with capturing versions.
-    gts::evaluator::builtins::register_globals(&vm);
+    let session = Session::new();
+    session
+        .vm()
+        .exec_mode
+        .store(EXEC_MODE_BYTECODE, Ordering::Relaxed);
 
-    let println_builtin = gts::object::Builtin {
+    let println_builtin = Builtin {
         name: "println".into(),
         func: Rc::new(move |_ctx, args: &[Object]| {
             let parts: Vec<String> = args.iter().map(|a| a.inspect()).collect();
@@ -35,9 +36,11 @@ fn run_vm_capturing(src: &str) -> String {
         }),
         extra: None,
     };
-    vm.set_global("println", Object::Builtin(Rc::new(println_builtin)));
+    session
+        .vm()
+        .set_global("println", Object::Builtin(Rc::new(println_builtin)));
 
-    let print_builtin = gts::object::Builtin {
+    let print_builtin = Builtin {
         name: "print".into(),
         func: Rc::new(move |_ctx, args: &[Object]| {
             for a in args {
@@ -47,25 +50,26 @@ fn run_vm_capturing(src: &str) -> String {
         }),
         extra: None,
     };
-    vm.set_global("print", Object::Builtin(Rc::new(print_builtin)));
+    session
+        .vm()
+        .set_global("print", Object::Builtin(Rc::new(print_builtin)));
 
-    let lexer = Lexer::new(src);
-    let mut parser = Parser::new(lexer, "fixture.gs");
-    let program = parser.parse_program();
+    let fixture_dir = parity_root().join(dir);
+    let entry = fixture_entry(&fixture_dir);
+    let result = session
+        .run_file(entry, Vec::new())
+        .unwrap_or_else(|err| panic!("{dir} should run under bytecode VM: {}", err.inspect()));
     assert!(
-        program.errors.is_empty(),
-        "parse errors: {:?}",
-        program.errors
+        !result.is_runtime_error(),
+        "{dir} returned runtime error: {}",
+        result.inspect()
     );
-
-    let env = Environment::new_root(vm);
-    let chunk = match compile(&program) {
-        Ok(c) => c,
-        Err(e) => panic!("compile error: {:?}", e),
-    };
-    let _result = interpret(&chunk, &env);
     let out: String = captured.borrow().clone();
     out
+}
+
+fn fixture_entry(fixture_dir: &Path) -> PathBuf {
+    gts::module::resolve_entry_in_dir(fixture_dir).unwrap_or_else(|| fixture_dir.join("main.gs"))
 }
 
 struct Fixture {
@@ -73,8 +77,7 @@ struct Fixture {
     expected: &'static str,
 }
 
-/// Stage 1/2/3 fixtures whose dependencies are now covered by the bytecode VM.
-fn stage_1_3_fixtures() -> Vec<Fixture> {
+fn all_parity_fixtures() -> Vec<Fixture> {
     vec![
         Fixture {
             dir: "basic_expression",
@@ -304,35 +307,54 @@ fn stage_1_3_fixtures() -> Vec<Fixture> {
             dir: "typeof_values",
             expected: "typeof-values=number:string:boolean:object:undefined:object:object:function:function\n",
         },
+        Fixture {
+            dir: "relative_require",
+            expected: "relative-require=18\n",
+        },
+        Fixture {
+            dir: "nested_relative_require",
+            expected: "nested-relative-require=21\n",
+        },
+        Fixture {
+            dir: "project_module_require",
+            expected: "project-module-require=42\n",
+        },
+        Fixture {
+            dir: "directory_module_index",
+            expected: "directory-module-index=42\n",
+        },
+        Fixture {
+            dir: "module_cache",
+            expected: "module-cache=1:1\n",
+        },
+        Fixture {
+            dir: "module_exports_object",
+            expected: "module-exports-object=42\n",
+        },
+        Fixture {
+            dir: "import_default_like",
+            expected: "import-default-like=12\n",
+        },
+        Fixture {
+            dir: "export_const",
+            expected: "export-const=export:42\n",
+        },
+        Fixture {
+            dir: "export_function_alias",
+            expected: "export-function-alias=18\n",
+        },
+        Fixture {
+            dir: "project_entry",
+            expected: "project-entry=ok\n",
+        },
     ]
 }
 
 #[test]
-fn bytecode_vm_matches_stage_1_3_fixtures() {
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/parity");
-    for fx in stage_1_3_fixtures() {
-        // loop_array_build uses arrays which are stage 5; skip if the source
-        // won't compile yet. We detect by attempting compile.
-        let path = root.join(fx.dir).join("main.gs");
-        let src = match std::fs::read_to_string(&path) {
-            Ok(s) => s,
-            Err(e) => panic!("read {}: {}", path.display(), e),
-        };
-        // Try compile first; if it fails (unsupported node), report skip.
-        let lexer = Lexer::new(&src);
-        let mut parser = Parser::new(lexer, "fixture.gs");
-        let program = parser.parse_program();
-        if !program.errors.is_empty() {
-            panic!("{} parse errors: {:?}", fx.dir, program.errors);
-        }
-        match compile(&program) {
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("SKIP {}: compile error (later stage): {:?}", fx.dir, e);
-                continue;
-            }
-        }
-        let out = run_vm_capturing(&src);
+fn bytecode_vm_matches_all_parity_fixtures() {
+    assert_all_fixture_dirs_are_covered();
+    for fx in all_parity_fixtures() {
+        let out = run_fixture_capturing(fx.dir);
         if out != fx.expected {
             eprintln!(
                 "fixture `{}` mismatch:\n--- expected ---\n{:?}\n--- got ---\n{:?}",
@@ -345,4 +367,36 @@ fn bytecode_vm_matches_stage_1_3_fixtures() {
             fx.dir
         );
     }
+}
+
+fn assert_all_fixture_dirs_are_covered() {
+    let expected: BTreeSet<&'static str> = all_parity_fixtures()
+        .into_iter()
+        .map(|fixture| fixture.dir)
+        .collect();
+    let discovered: BTreeSet<String> = std::fs::read_dir(parity_root())
+        .expect("read parity fixtures")
+        .filter_map(|entry| {
+            let entry = entry.expect("read fixture entry");
+            if entry.path().is_dir() {
+                Some(
+                    entry
+                        .file_name()
+                        .into_string()
+                        .expect("fixture names must be utf-8"),
+                )
+            } else {
+                None
+            }
+        })
+        .collect();
+    let expected_strings: BTreeSet<String> = expected.into_iter().map(str::to_string).collect();
+    assert_eq!(
+        discovered, expected_strings,
+        "bytecode parity fixture list must cover every directory under tests/fixtures/parity"
+    );
+}
+
+fn parity_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/parity")
 }

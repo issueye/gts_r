@@ -264,8 +264,8 @@
 
 ## 阶段 10：全量验收 + 默认切换
 
-- [ ] 10.1 **REQ-1**：`cargo test --test bytecode_parity` 全部 fixture（51+补的）VM 单跑全绿
-  - 证据：（待填测试输出）
+- [x] 10.1 **REQ-1**：`cargo test --test bytecode_parity` 全部 fixture（51+补的）VM 单跑全绿
+  - 证据：`tests/bytecode_parity.rs` 改为通过 `Session` 的 `EXEC_MODE_BYTECODE` 运行 parity fixture，并用 `assert_all_fixture_dirs_are_covered` 断言清单覆盖 `tests/fixtures/parity` 下全部 67 个目录；覆盖普通脚本、require/import/export 模块 fixture 与 `project.toml` 入口 `project_entry`；验证：`cargo fmt --all --check` passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed（`bytecode_vm_matches_all_parity_fixtures`）
 - [ ] 10.2 **REQ-2**：`gts\verification\**` 12 套件在 `--exec-mode=bytecode` 下全绿
   - 证据：（待填）
 - [ ] 10.3 **REQ-3**：§3.5 编译器覆盖度表 100%，无未覆盖节点
@@ -285,9 +285,9 @@
 > **续工时从这里开始。**
 
 **当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7 Match 全集与类型注解已完成并收口；阶段 8 模块系统全集已完成并收口；阶段 9 异步全集已完成并收口
-**下一条 TODO**：继续阶段 10，推进 10.1 全量 bytecode parity fixture 验收
+**下一条 TODO**：继续阶段 10，推进 10.2 `gts\verification\**` bytecode 模式验收
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 9.6 已完成：异步全集提交链收口，窄回归与模块门通过；下一步推进阶段 10 全量验收）
+**最后更新**：2026-06-22（阶段 10.1 已完成：bytecode parity 测试覆盖全部 67 个 parity fixture，并通过运行时 bytecode 模式全量验收；下一步推进 verification 套件 bytecode 模式验收）
 
 ---
 
