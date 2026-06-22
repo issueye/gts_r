@@ -65,7 +65,7 @@ fn call_closure_impl(
         Some(c) => c,
         None => return Err(new_error(pos, "VMError: function body not compiled")),
     };
-    let result = super::interp::interpret(&chunk, &scope);
+    let result = super::interp::interpret_with_upvalues(&chunk, &scope, c.upvalues.clone());
     if result.is_runtime_error() {
         Err(result)
     } else {

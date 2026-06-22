@@ -13,6 +13,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use super::upvalue::Upvalue;
 use crate::ast::{BlockStmt, Param, Position, TypeAnnotation};
 
 /// Parameter metadata used by the bytecode call layer.
@@ -70,6 +71,9 @@ pub struct FunctionProto {
 /// definition time (the defining scope, used for name resolution).
 pub struct ClosureData {
     pub proto: Rc<FunctionProto>,
+    /// Runtime upvalues captured when `OpClosure` executes. Stage 4.3 wires
+    /// capture/close lifetime; 4.4 will make load/store opcodes consume these.
+    pub upvalues: Vec<Rc<Upvalue>>,
     /// The environment captured at definition. Stage 3 uses it as the parent
     /// for the call scope so globals resolve; stage 4 adds true upvalue
     /// capture for locals.

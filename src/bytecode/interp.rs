@@ -12,10 +12,13 @@
 use crate::ast::Position;
 use crate::object::{new_error, str_obj, ArrayData, CallContext, EnvRef, HashData, Object};
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use super::chunk::Chunk;
+use super::closure::UpvalueSource;
 use super::opcode::Opcode;
+use super::upvalue::Upvalue;
 use crate::evaluator::builtins::register_globals;
 use crate::evaluator::expressions::{apply_binary_op, apply_unary_op};
 
@@ -27,6 +30,14 @@ use crate::evaluator::expressions::{apply_binary_op, apply_unary_op};
 /// builtins the CLI session provides. `register_globals` overwrites, so
 /// calling it twice is safe.
 pub fn interpret(chunk: &Chunk, env: &EnvRef) -> Object {
+    interpret_with_upvalues(chunk, env, Vec::new())
+}
+
+pub(crate) fn interpret_with_upvalues(
+    chunk: &Chunk,
+    env: &EnvRef,
+    upvalues: Vec<Rc<Upvalue>>,
+) -> Object {
     let vm = env.borrow().vm.clone();
     // Install the standard globals (println, print, console, Math, ...) only
     // if they aren't already present, so callers that supply their own (e.g. a
@@ -34,7 +45,7 @@ pub fn interpret(chunk: &Chunk, env: &EnvRef) -> Object {
     if !vm.has_global("println") {
         register_globals(&vm);
     }
-    let mut state = VmState::new(chunk, env.clone());
+    let mut state = VmState::new(chunk, env.clone(), upvalues);
     state.run()
 }
 
@@ -43,15 +54,19 @@ struct VmState<'a> {
     ip: usize,
     stack: Vec<Object>,
     env: EnvRef,
+    open_upvalues: BTreeMap<usize, Vec<Rc<Upvalue>>>,
+    current_upvalues: Vec<Rc<Upvalue>>,
 }
 
 impl<'a> VmState<'a> {
-    fn new(chunk: &'a Chunk, env: EnvRef) -> Self {
+    fn new(chunk: &'a Chunk, env: EnvRef, current_upvalues: Vec<Rc<Upvalue>>) -> Self {
         VmState {
             chunk,
             ip: 0,
             stack: Vec::with_capacity(256),
             env,
+            open_upvalues: BTreeMap::new(),
+            current_upvalues,
         }
     }
 
@@ -157,9 +172,11 @@ impl<'a> VmState<'a> {
 
             Opcode::Return => {
                 let v = self.stack.pop().unwrap_or(Object::Undefined);
+                self.close_open_upvalues_from(0);
                 return Ok(Flow::Return(v));
             }
             Opcode::ReturnNull => {
+                self.close_open_upvalues_from(0);
                 return Ok(Flow::Return(Object::Null));
             }
             Opcode::ToString => {
@@ -249,10 +266,10 @@ impl<'a> VmState<'a> {
                 let proto_idx = self.chunk.read_u16(self.ip) as usize;
                 self.ip += 2;
                 let proto = self.chunk.protos[proto_idx].clone();
-                // Capture the current environment as the closure's home. Stage
-                // 4 will refine this to per-variable upvalue capture.
+                let upvalues = self.capture_proto_upvalues(&proto)?;
                 let closure = crate::bytecode::closure::ClosureData {
                     proto,
+                    upvalues,
                     home_env: self.env.clone(),
                 };
                 self.stack.push(Object::Closure(Rc::new(closure)));
@@ -500,6 +517,59 @@ impl<'a> VmState<'a> {
         new_error(pos, "VMError: stack underflow")
     }
 
+    fn capture_proto_upvalues(
+        &mut self,
+        proto: &Rc<crate::bytecode::closure::FunctionProto>,
+    ) -> Result<Vec<Rc<Upvalue>>, Object> {
+        let mut captured = Vec::with_capacity(proto.upvalue_desc.len());
+        for desc in &proto.upvalue_desc {
+            match desc.source {
+                UpvalueSource::LocalSlot(slot) => {
+                    captured.push(self.capture_open_upvalue(slot as usize));
+                }
+                UpvalueSource::ParentUpvalue(index) => {
+                    let Some(parent) = self.current_upvalues.get(index as usize) else {
+                        return Err(new_error(
+                            proto.pos.clone(),
+                            format!(
+                                "VMError: missing parent upvalue {} for closure {}",
+                                index, proto.name
+                            ),
+                        ));
+                    };
+                    captured.push(parent.clone());
+                }
+            }
+        }
+        Ok(captured)
+    }
+
+    fn capture_open_upvalue(&mut self, slot: usize) -> Rc<Upvalue> {
+        let entry = self.open_upvalues.entry(slot).or_default();
+        if let Some(existing) = entry.iter().find(|upvalue| upvalue.is_open()) {
+            return existing.clone();
+        }
+        let upvalue = Upvalue::new_open(slot);
+        entry.push(upvalue.clone());
+        upvalue
+    }
+
+    fn close_open_upvalues_from(&mut self, first_slot: usize) {
+        let slots = &self.stack;
+        let closing_slots: Vec<usize> = self
+            .open_upvalues
+            .range(first_slot..)
+            .map(|(slot, _)| *slot)
+            .collect();
+        for slot in closing_slots {
+            if let Some(upvalues) = self.open_upvalues.remove(&slot) {
+                for upvalue in upvalues {
+                    upvalue.close_from_slots(slots);
+                }
+            }
+        }
+    }
+
     fn read_string_const(
         &self,
         idx: usize,
@@ -653,6 +723,13 @@ mod tests {
         interpret(&chunk, &env)
     }
 
+    fn state_for_upvalue_tests() -> VmState<'static> {
+        let chunk = Box::leak(Box::new(Chunk::new()));
+        let vm = VirtualMachine::new();
+        let env = Environment::new_root(vm);
+        VmState::new(chunk, env, Vec::new())
+    }
+
     #[test]
     fn stage0_contract_one_plus_two() {
         // The single non-negotiable stage-0 contract: 1 + 2 → 3.0
@@ -671,6 +748,35 @@ mod tests {
         let mut chunk = Chunk::new();
         chunk.write_op(Opcode::ReturnNull, Position::default());
         assert!(matches!(run_chunk(chunk), Object::Null));
+    }
+
+    #[test]
+    fn open_upvalues_reuse_the_same_slot_capture() {
+        let mut state = state_for_upvalue_tests();
+        state.stack.push(Object::Number(1.0));
+        state.stack.push(Object::Number(2.0));
+
+        let first = state.capture_open_upvalue(1);
+        let second = state.capture_open_upvalue(1);
+
+        assert!(Rc::ptr_eq(&first, &second));
+        assert_eq!(state.open_upvalues.len(), 1);
+        assert!(matches!(first.get(&state.stack), Some(Object::Number(2.0))));
+    }
+
+    #[test]
+    fn return_closes_open_upvalues_from_frame_slots() {
+        let mut state = state_for_upvalue_tests();
+        state.stack.push(Object::Number(3.0));
+        state.stack.push(Object::Number(4.0));
+        let kept = state.capture_open_upvalue(1);
+
+        state.close_open_upvalues_from(0);
+        state.stack[1] = Object::Number(9.0);
+
+        assert!(state.open_upvalues.is_empty());
+        assert!(!kept.is_open());
+        assert!(matches!(kept.get(&state.stack), Some(Object::Number(4.0))));
     }
 
     // —— arithmetic operators (each covered by its own case) ——

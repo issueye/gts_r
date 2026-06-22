@@ -10,6 +10,7 @@ use std::rc::Rc;
 use crate::object::{EnvRef, Object};
 
 use super::closure::{FunctionProto, UpvalueDesc};
+use super::upvalue::Upvalue;
 
 /// A captured value visible to a call frame.
 #[derive(Clone)]
@@ -19,6 +20,8 @@ pub enum FrameUpvalue {
     Deferred(UpvalueDesc),
     /// A closed-over value after an outer frame exits.
     Closed(Rc<RefCell<Object>>),
+    /// A runtime upvalue captured from an outer bytecode frame.
+    Captured(Rc<Upvalue>),
 }
 
 /// Runtime call-frame state.
