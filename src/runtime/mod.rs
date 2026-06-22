@@ -47,6 +47,7 @@ impl Session {
     /// Create a fresh session with standard globals installed.
     pub fn new() -> Session {
         let vm = VirtualMachine::new();
+        vm.exec_mode.store(EXEC_MODE_BYTECODE, Ordering::Relaxed);
         register_globals(&vm);
         vm.set_evaluator(Rc::new(eval_node));
 
@@ -73,6 +74,7 @@ impl Session {
     #[cfg(feature = "tokio")]
     pub fn with_tokio() -> Session {
         let vm = VirtualMachine::new();
+        vm.exec_mode.store(EXEC_MODE_BYTECODE, Ordering::Relaxed);
         register_globals(&vm);
         vm.set_evaluator(Rc::new(eval_node));
 

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process;
 use std::time::Duration;
 
-use gts::object::Object;
+use gts::object::{Object, EXEC_MODE_BYTECODE, EXEC_MODE_TREEWALK};
 use gts::packagefile;
 use gts::runtime::{RunOptions, Session};
 use gts::VERSION;
@@ -32,12 +32,21 @@ fn main() {
             call_main,
             timeout,
             default_workers,
-        }) => run_script(script, script_args, call_main, timeout, default_workers),
+            exec_mode,
+        }) => run_script(
+            script,
+            script_args,
+            call_main,
+            timeout,
+            default_workers,
+            exec_mode,
+        ),
         Ok(Command::RunScript {
             script,
             script_args,
             timeout,
-        }) => run_script(script, script_args, true, timeout, None),
+            exec_mode,
+        }) => run_script(script, script_args, true, timeout, None, exec_mode),
         Ok(Command::Pack { dir, output }) => pack_project(dir, output),
         Ok(Command::Dist { dir, output }) => dist_project(dir, output),
         Ok(Command::Bundle { entry, output }) => bundle_project(entry, output),
@@ -90,7 +99,14 @@ fn run_embedded_app(args: Vec<String>) {
             process::exit(1);
         }
     };
-    run_script(default_entry_in(&app_dir), app_args, true, None, None);
+    run_script(
+        default_entry_in(&app_dir),
+        app_args,
+        true,
+        None,
+        None,
+        EXEC_MODE_BYTECODE,
+    );
 }
 #[derive(Debug)]
 enum Command {
@@ -106,11 +122,13 @@ enum Command {
         call_main: bool,
         timeout: Option<Duration>,
         default_workers: Option<usize>,
+        exec_mode: u8,
     },
     RunScript {
         script: PathBuf,
         script_args: Vec<String>,
         timeout: Option<Duration>,
+        exec_mode: u8,
     },
     Pack {
         dir: PathBuf,
@@ -186,6 +204,7 @@ fn parse_cli(args: Vec<String>) -> Result<Command, String> {
                 call_main: true,
                 timeout: options.timeout,
                 default_workers: options.workers,
+                exec_mode: options.exec_mode,
             })
         }
         "run-script" => {
@@ -210,6 +229,7 @@ fn parse_cli(args: Vec<String>) -> Result<Command, String> {
                 script,
                 script_args,
                 timeout: options.timeout,
+                exec_mode: options.exec_mode,
             })
         }
         "pack" => {
@@ -262,6 +282,7 @@ fn parse_cli(args: Vec<String>) -> Result<Command, String> {
                 call_main,
                 timeout: options.timeout,
                 default_workers: options.workers,
+                exec_mode: options.exec_mode,
             })
         }
     }
@@ -276,10 +297,20 @@ enum FlagAction {
     ApiDoc(String),
 }
 
-#[derive(Default)]
 struct CliOptions {
     timeout: Option<Duration>,
     workers: Option<usize>,
+    exec_mode: u8,
+}
+
+impl Default for CliOptions {
+    fn default() -> Self {
+        Self {
+            timeout: None,
+            workers: None,
+            exec_mode: EXEC_MODE_BYTECODE,
+        }
+    }
 }
 
 fn parse_global_flags(
@@ -322,6 +353,24 @@ fn parse_global_flags(
                     .get(*index)
                     .ok_or_else(|| "--workers requires a positive integer".to_string())?;
                 options.workers = Some(parse_workers(value)?);
+                *index += 1;
+            }
+            "--exec-mode" => {
+                *index += 1;
+                let value = args
+                    .get(*index)
+                    .ok_or_else(|| "--exec-mode requires 'bytecode' or 'tree'".to_string())?;
+                options.exec_mode = parse_exec_mode(value)?;
+                *index += 1;
+            }
+            value if value.starts_with("--exec-mode=") => {
+                let mode = value
+                    .strip_prefix("--exec-mode=")
+                    .expect("prefix checked above");
+                if mode.is_empty() {
+                    return Err("--exec-mode requires 'bytecode' or 'tree'".to_string());
+                }
+                options.exec_mode = parse_exec_mode(mode)?;
                 *index += 1;
             }
             "--" => {
@@ -375,12 +424,23 @@ fn parse_workers(value: &str) -> Result<usize, String> {
     }
 }
 
+fn parse_exec_mode(value: &str) -> Result<u8, String> {
+    match value {
+        "bytecode" | "vm" => Ok(EXEC_MODE_BYTECODE),
+        "tree" | "treewalk" | "tree-walk" => Ok(EXEC_MODE_TREEWALK),
+        _ => Err(format!(
+            "invalid --exec-mode value '{value}' (expected 'bytecode' or 'tree')"
+        )),
+    }
+}
+
 fn run_script(
     script: PathBuf,
     script_args: Vec<String>,
     call_main: bool,
     timeout: Option<Duration>,
     default_workers: Option<usize>,
+    exec_mode: u8,
 ) {
     // Expose --workers as an environment default the script can read via
     // @std/env (e.g. `app.listen(port, { workers: process.env.GTS_DEFAULT_WORKERS })`).
@@ -391,6 +451,10 @@ fn run_script(
         std::env::set_var("GTS_DEFAULT_WORKERS", n.to_string());
     }
     let session = Session::new();
+    session
+        .vm()
+        .exec_mode
+        .store(exec_mode, std::sync::atomic::Ordering::Relaxed);
     match session.run_file_with_options(
         &script,
         RunOptions {
@@ -654,6 +718,7 @@ fn print_help(program: &str) {
     println!("  -v, --version             Show version information");
     println!("      --timeout <duration>  Execution timeout (e.g., 10s, 1m, 0 to disable)");
     println!("      --workers <n>         Maximum async worker count");
+    println!("      --exec-mode <mode>    Execution backend: bytecode (default) or tree");
     println!("      --check-types         Enable type checking (not implemented)");
     println!("      --api_doc <module>    Print API documentation (module name or 'all')");
     println!();

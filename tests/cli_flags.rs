@@ -157,6 +157,35 @@ fn cli_accepts_timeout_and_workers_for_run() {
 }
 
 #[test]
+fn cli_exec_mode_tree_keeps_treewalker_fallback() {
+    let dir = unique_temp_dir("gts-cli-exec-mode-tree");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let script = dir.join("nullish.gs");
+    fs::write(
+        &script,
+        r#"
+let fallback = null ?? 42;
+println(`tree=${fallback}`);
+"#,
+    )
+    .expect("write script");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_gs"))
+        .arg("--exec-mode=tree")
+        .arg(&script)
+        .output()
+        .expect("run gs with tree exec mode");
+
+    assert!(
+        output.status.success(),
+        "gs failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "tree=42\n");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn cli_timeout_stops_infinite_loop() {
     let dir = unique_temp_dir("gts-cli-timeout");
     fs::create_dir_all(&dir).expect("create temp dir");
