@@ -15,6 +15,7 @@ pub mod compiler;
 pub mod frame;
 pub mod interp;
 pub mod opcode;
+pub mod resolve;
 pub mod upvalue;
 
 pub use chunk::{Chunk, ProtectedRegion};

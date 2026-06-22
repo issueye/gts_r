@@ -86,6 +86,28 @@ impl FunctionProto {
         return_t: Option<TypeAnnotation>,
         pos: Position,
     ) -> Rc<FunctionProto> {
+        FunctionProto::with_upvalues(
+            name,
+            params,
+            body,
+            is_async,
+            lexical_this,
+            return_t,
+            pos,
+            Vec::new(),
+        )
+    }
+
+    pub fn with_upvalues(
+        name: impl Into<String>,
+        params: Vec<Param>,
+        body: BlockStmt,
+        is_async: bool,
+        lexical_this: bool,
+        return_t: Option<TypeAnnotation>,
+        pos: Position,
+        upvalue_desc: Vec<UpvalueDesc>,
+    ) -> Rc<FunctionProto> {
         let arity = required_arity(&params);
         let param_slots = build_param_slots(&params);
         Rc::new(FunctionProto {
@@ -93,7 +115,7 @@ impl FunctionProto {
             params,
             arity,
             param_slots,
-            upvalue_desc: Vec::new(),
+            upvalue_desc,
             body: Rc::new(body),
             is_async,
             lexical_this,

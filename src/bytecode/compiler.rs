@@ -21,15 +21,17 @@ use std::rc::Rc;
 use super::chunk::Chunk;
 use super::closure::FunctionProto;
 use super::opcode::Opcode;
+use super::resolve::{self, ResolutionMap};
 
 /// Compile a whole program. Emits each statement in order followed by a
 /// terminal RETURN, so the interpreter leaves the last value on the stack.
 pub fn compile(program: &Program) -> Result<Chunk, Object> {
+    let resolutions = resolve::resolve_program(program);
     let mut chunk = Chunk::new();
     let mut loops: Vec<LoopFrame> = Vec::new();
     let n = program.body.len();
     for (i, stmt) in program.body.iter().enumerate() {
-        compile_stmt(stmt, &mut chunk, &mut loops, i + 1 == n)?;
+        compile_stmt(stmt, &mut chunk, &mut loops, i + 1 == n, &resolutions)?;
     }
     // Top-level RETURN: the program's result is whatever sits on the stack.
     chunk.write_op(Opcode::Return, program.pos.clone());
@@ -53,10 +55,11 @@ fn compile_stmt(
     chunk: &mut Chunk,
     loops: &mut Vec<LoopFrame>,
     keep_value: bool,
+    resolutions: &ResolutionMap,
 ) -> Result<(), Object> {
     match stmt {
         Stmt::Expr(e) => {
-            compile_expr(&e.expr, chunk)?;
+            compile_expr(&e.expr, chunk, resolutions)?;
             if !keep_value {
                 // Discard the expression value so it doesn't accumulate on the
                 // stack across iterations / statements. The top-level last
@@ -65,18 +68,39 @@ fn compile_stmt(
             }
             Ok(())
         }
-        Stmt::Let(s) => compile_decl(&s.name, s.value.as_ref(), false, s.pos.clone(), chunk),
-        Stmt::Var(s) => compile_decl(&s.name, s.value.as_ref(), false, s.pos.clone(), chunk),
-        Stmt::Const(s) => compile_decl(&s.name, s.value.as_ref(), true, s.pos.clone(), chunk),
+        Stmt::Let(s) => compile_decl(
+            &s.name,
+            s.value.as_ref(),
+            false,
+            s.pos.clone(),
+            chunk,
+            resolutions,
+        ),
+        Stmt::Var(s) => compile_decl(
+            &s.name,
+            s.value.as_ref(),
+            false,
+            s.pos.clone(),
+            chunk,
+            resolutions,
+        ),
+        Stmt::Const(s) => compile_decl(
+            &s.name,
+            s.value.as_ref(),
+            true,
+            s.pos.clone(),
+            chunk,
+            resolutions,
+        ),
         Stmt::Block(b) => {
             for s in &b.statements {
-                compile_stmt(s, chunk, loops, false)?;
+                compile_stmt(s, chunk, loops, false, resolutions)?;
             }
             Ok(())
         }
-        Stmt::If(s) => compile_if(s, chunk, loops, keep_value),
-        Stmt::While(s) => compile_while(s, None, chunk, loops, keep_value),
-        Stmt::For(s) => compile_for(s, None, chunk, loops, keep_value),
+        Stmt::If(s) => compile_if(s, chunk, loops, keep_value, resolutions),
+        Stmt::While(s) => compile_while(s, None, chunk, loops, keep_value, resolutions),
+        Stmt::For(s) => compile_for(s, None, chunk, loops, keep_value, resolutions),
         Stmt::ForIn(s) => compile_for_iter(
             &s.name,
             &s.iterable,
@@ -86,6 +110,7 @@ fn compile_stmt(
             None,
             chunk,
             loops,
+            resolutions,
         ),
         Stmt::ForOf(s) => compile_for_iter(
             &s.name,
@@ -96,10 +121,11 @@ fn compile_stmt(
             None,
             chunk,
             loops,
+            resolutions,
         ),
         Stmt::Break(s) => compile_break_continue(true, &s.label, s.pos.clone(), chunk, loops),
         Stmt::Continue(s) => compile_break_continue(false, &s.label, s.pos.clone(), chunk, loops),
-        Stmt::Labeled(s) => compile_labeled(s, chunk, loops, keep_value),
+        Stmt::Labeled(s) => compile_labeled(s, chunk, loops, keep_value, resolutions),
         Stmt::FuncDecl(f) => {
             // Compile the body to a proto (which lives in this chunk's proto
             // table), emit OP_CLOSURE to construct the closure value, then
@@ -113,6 +139,7 @@ fn compile_stmt(
                 f.return_t.clone(),
                 f.pos.clone(),
                 chunk,
+                resolutions,
             )?;
             chunk.write_op(Opcode::Closure, f.pos.clone());
             chunk.write_u16(proto_idx, f.pos.clone());
@@ -123,7 +150,7 @@ fn compile_stmt(
         }
         Stmt::Return(r) => {
             if let Some(v) = &r.value {
-                compile_expr(v, chunk)?;
+                compile_expr(v, chunk, resolutions)?;
             } else {
                 let idx = chunk.add_constant(Object::Undefined);
                 emit_const(chunk, idx, r.pos.clone());
@@ -141,12 +168,13 @@ fn compile_if(
     chunk: &mut Chunk,
     loops: &mut Vec<LoopFrame>,
     _keep_value: bool,
+    resolutions: &ResolutionMap,
 ) -> Result<(), Object> {
     // cond ; JUMP_IF_FALSE else ; <then> ; JUMP end ; else: <else> ; end:
-    compile_expr(&s.cond, chunk)?;
+    compile_expr(&s.cond, chunk, resolutions)?;
     let to_else = emit_jump_placeholder(chunk, Opcode::JumpIfFalse, s.pos.clone());
     for stmt in &s.consequence.statements {
-        compile_stmt(stmt, chunk, loops, false)?;
+        compile_stmt(stmt, chunk, loops, false, resolutions)?;
     }
     let to_end = if s.alternative.is_some() {
         Some(emit_jump_placeholder(chunk, Opcode::Jump, s.pos.clone()))
@@ -155,7 +183,7 @@ fn compile_if(
     };
     patch_jump_here(chunk, to_else);
     if let Some(alt) = &s.alternative {
-        compile_stmt(alt, chunk, loops, false)?;
+        compile_stmt(alt, chunk, loops, false, resolutions)?;
     }
     if let Some(end) = to_end {
         patch_jump_here(chunk, end);
@@ -170,17 +198,18 @@ fn compile_while(
     chunk: &mut Chunk,
     loops: &mut Vec<LoopFrame>,
     _keep_value: bool,
+    resolutions: &ResolutionMap,
 ) -> Result<(), Object> {
     // start: cond ; JUMP_IF_FALSE end ; <body> ; LOOP start ; end:
     let start = chunk.code.len() as u32;
-    compile_expr(&s.cond, chunk)?;
+    compile_expr(&s.cond, chunk, resolutions)?;
     let to_end = emit_jump_placeholder(chunk, Opcode::JumpIfFalse, s.pos.clone());
     loops.push(LoopFrame {
         label,
         ..LoopFrame::default()
     });
     for stmt in &s.body.statements {
-        compile_stmt(stmt, chunk, loops, false)?;
+        compile_stmt(stmt, chunk, loops, false, resolutions)?;
     }
     let frame = loops.pop().unwrap();
     // Back-edge: LOOP to the condition test.
@@ -205,15 +234,16 @@ fn compile_for(
     chunk: &mut Chunk,
     loops: &mut Vec<LoopFrame>,
     _keep_value: bool,
+    resolutions: &ResolutionMap,
 ) -> Result<(), Object> {
     // <init> ; start: <cond> ; JUMP_IF_FALSE end ; <body> ; post_start: <post> ; LOOP start ; end:
     if let Some(init) = &s.init {
-        compile_stmt(init, chunk, loops, false)?;
+        compile_stmt(init, chunk, loops, false, resolutions)?;
     }
     let start = chunk.code.len() as u32;
     let mut to_end: Option<u32> = None;
     if let Some(cond) = &s.cond {
-        compile_expr(cond, chunk)?;
+        compile_expr(cond, chunk, resolutions)?;
         to_end = Some(emit_jump_placeholder(
             chunk,
             Opcode::JumpIfFalse,
@@ -225,14 +255,14 @@ fn compile_for(
         ..LoopFrame::default()
     });
     for stmt in &s.body.statements {
-        compile_stmt(stmt, chunk, loops, false)?;
+        compile_stmt(stmt, chunk, loops, false, resolutions)?;
     }
     let frame = loops.pop().unwrap();
     // post expression (continue targets here) — recorded AFTER the body so its
     // offset is correct.
     let post_start = chunk.code.len() as u32;
     if let Some(post) = &s.post {
-        compile_expr(post, chunk)?;
+        compile_expr(post, chunk, resolutions)?;
         chunk.write_op(Opcode::Pop, s.pos.clone()); // discard post value
     }
     chunk.write_op(Opcode::Loop, s.pos.clone());
@@ -259,13 +289,14 @@ fn compile_for_iter(
     label: Option<String>,
     chunk: &mut Chunk,
     loops: &mut Vec<LoopFrame>,
+    resolutions: &ResolutionMap,
 ) -> Result<(), Object> {
     let suffix = format!("{}_{}", pos.line, pos.col);
     let items_name = format!("__gts_bc_iter_items_{}", suffix);
     let idx_name = format!("__gts_bc_iter_idx_{}", suffix);
 
     // items = ITER_KEYS/ITER_VALUES(iterable)
-    compile_expr(iterable, chunk)?;
+    compile_expr(iterable, chunk, resolutions)?;
     chunk.write_op(iter_op, pos.clone());
     let items_idx = chunk.add_constant(str_obj(items_name.clone()));
     chunk.write_op(Opcode::StoreName, pos.clone());
@@ -299,7 +330,7 @@ fn compile_for_iter(
         ..LoopFrame::default()
     });
     for stmt in &body.statements {
-        compile_stmt(stmt, chunk, loops, false)?;
+        compile_stmt(stmt, chunk, loops, false, resolutions)?;
     }
     let frame = loops.pop().unwrap();
 
@@ -333,10 +364,25 @@ fn compile_labeled(
     chunk: &mut Chunk,
     loops: &mut Vec<LoopFrame>,
     keep_value: bool,
+    resolutions: &ResolutionMap,
 ) -> Result<(), Object> {
     match s.stmt.as_ref() {
-        Stmt::While(w) => compile_while(w, Some(s.label.clone()), chunk, loops, keep_value),
-        Stmt::For(f) => compile_for(f, Some(s.label.clone()), chunk, loops, keep_value),
+        Stmt::While(w) => compile_while(
+            w,
+            Some(s.label.clone()),
+            chunk,
+            loops,
+            keep_value,
+            resolutions,
+        ),
+        Stmt::For(f) => compile_for(
+            f,
+            Some(s.label.clone()),
+            chunk,
+            loops,
+            keep_value,
+            resolutions,
+        ),
         Stmt::ForIn(f) => compile_for_iter(
             &f.name,
             &f.iterable,
@@ -346,6 +392,7 @@ fn compile_labeled(
             Some(s.label.clone()),
             chunk,
             loops,
+            resolutions,
         ),
         Stmt::ForOf(f) => compile_for_iter(
             &f.name,
@@ -356,8 +403,9 @@ fn compile_labeled(
             Some(s.label.clone()),
             chunk,
             loops,
+            resolutions,
         ),
-        other => compile_stmt(other, chunk, loops, keep_value),
+        other => compile_stmt(other, chunk, loops, keep_value, resolutions),
     }
 }
 
@@ -414,6 +462,7 @@ fn compile_break_continue(
 fn compile_template_interpolated(
     t: &crate::ast::TemplateLit,
     chunk: &mut Chunk,
+    resolutions: &ResolutionMap,
 ) -> Result<(), Object> {
     let lit = &t.literal;
     if lit.len() < 2 || !lit.starts_with('`') {
@@ -445,7 +494,7 @@ fn compile_template_interpolated(
                 // Re-parse the sub-expression at compile time so the emitted
                 // bytecode reflects its structure (not a runtime re-parse).
                 let sub_expr = parse_template_expr(expr_str, t.pos.clone())?;
-                compile_expr(&sub_expr, chunk)?;
+                compile_expr(&sub_expr, chunk, resolutions)?;
                 chunk.write_op(Opcode::ToString, t.pos.clone());
                 if segments_emitted > 0 {
                     chunk.write_op(Opcode::Concat, t.pos.clone());
@@ -552,8 +601,9 @@ fn patch_jump_to(chunk: &mut Chunk, operand_ip: u32, target: u32) {
 ///
 /// The body is compiled with its own statement stream and a trailing RETURN
 /// (returning the last statement's value, or Undefined). Parameters are bound
-/// by the interpreter at call time into the call environment, so the body's
-/// parameter references resolve as plain `LoadName`.
+/// by the interpreter at call time into the call environment. Stage 4.2 also
+/// attaches the lexical upvalue descriptors; 4.4 will lower matching reads and
+/// writes from dynamic names to slot/upvalue opcodes.
 fn compile_function_proto(
     name: &str,
     params: Vec<crate::ast::Param>,
@@ -563,19 +613,33 @@ fn compile_function_proto(
     return_t: Option<crate::ast::TypeAnnotation>,
     pos: crate::ast::Position,
     parent: &mut Chunk,
+    resolutions: &ResolutionMap,
 ) -> Result<u16, Object> {
     let mut sub = Chunk::new();
     let mut loops: Vec<LoopFrame> = Vec::new();
     let n = body.statements.len();
     for (i, stmt) in body.statements.iter().enumerate() {
-        compile_stmt(stmt, &mut sub, &mut loops, i + 1 == n)?;
+        compile_stmt(stmt, &mut sub, &mut loops, i + 1 == n, resolutions)?;
     }
     // If the body didn't end in an explicit RETURN, emit one so the call
     // always returns (the last value, or Undefined).
     if !matches_last_opcode(&sub, Opcode::Return) {
         sub.write_op(Opcode::Return, pos.clone());
     }
-    let proto = FunctionProto::new(name, params, body, is_async, lexical_this, return_t, pos);
+    let upvalue_desc = resolutions
+        .function(name, &pos)
+        .map(|resolution| resolution.upvalues.clone())
+        .unwrap_or_default();
+    let proto = FunctionProto::with_upvalues(
+        name,
+        params,
+        body,
+        is_async,
+        lexical_this,
+        return_t,
+        pos,
+        upvalue_desc,
+    );
     let idx = parent.protos.len() as u16;
     // Fill the chunk before moving proto into the table (borrow then push).
     *proto.chunk.borrow_mut() = Some(Rc::new(sub));
@@ -635,9 +699,10 @@ fn compile_decl(
     is_const: bool,
     pos: crate::ast::Position,
     chunk: &mut Chunk,
+    resolutions: &ResolutionMap,
 ) -> Result<(), Object> {
     if let Some(v) = value {
-        compile_expr(v, chunk)?;
+        compile_expr(v, chunk, resolutions)?;
     } else {
         // Declaration without initializer → undefined.
         let idx = chunk.add_constant(Object::Undefined);
@@ -657,7 +722,7 @@ fn compile_decl(
     Ok(())
 }
 
-fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
+fn compile_expr(expr: &Expr, chunk: &mut Chunk, resolutions: &ResolutionMap) -> Result<(), Object> {
     match expr {
         // —— identifier read ——
         Expr::Ident(i) => {
@@ -667,7 +732,7 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
             Ok(())
         }
         // —— assignment `name = expr` (and compound `+=` etc.) ——
-        Expr::Assign(a) => compile_assign(a, chunk),
+        Expr::Assign(a) => compile_assign(a, chunk, resolutions),
 
         // —— literals ——
         Expr::Number(n) => {
@@ -723,14 +788,14 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
                 emit_const(chunk, idx, t.pos.clone());
                 return Ok(());
             }
-            compile_template_interpolated(t, chunk)
+            compile_template_interpolated(t, chunk, resolutions)
         }
         Expr::Array(a) => {
             for element in &a.elements {
                 if matches!(element, Expr::Spread(_)) {
                     return Err(unsupported(element.pos(), "array spread literal element"));
                 }
-                compile_expr(element, chunk)?;
+                compile_expr(element, chunk, resolutions)?;
             }
             chunk.write_op(Opcode::NewArray, a.pos.clone());
             chunk.write_u16(a.elements.len() as u16, a.pos.clone());
@@ -745,7 +810,7 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
                         "object spread/computed/accessor property",
                     ));
                 }
-                compile_expr(&prop.value, chunk)?;
+                compile_expr(&prop.value, chunk, resolutions)?;
                 let key = object_property_key(prop)?;
                 let key_idx = chunk.add_constant(str_obj(key));
                 chunk.write_op(Opcode::SetProperty, prop.pos.clone());
@@ -764,7 +829,7 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
                     &format!("prefix operator `{}`", p.op),
                 ));
             }
-            compile_expr(&p.right, chunk)?;
+            compile_expr(&p.right, chunk, resolutions)?;
             let op = match p.op.as_str() {
                 "!" => Opcode::Not,
                 "-" => Opcode::Neg,
@@ -806,20 +871,20 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
             }
             match i.op.as_str() {
                 "&&" => {
-                    compile_expr(&i.left, chunk)?;
-                    compile_and(i, chunk)
+                    compile_expr(&i.left, chunk, resolutions)?;
+                    compile_and(i, chunk, resolutions)
                 }
                 "||" => {
-                    compile_expr(&i.left, chunk)?;
-                    compile_or(i, chunk)
+                    compile_expr(&i.left, chunk, resolutions)?;
+                    compile_or(i, chunk, resolutions)
                 }
                 "??" => Err(unsupported(
                     i.pos.clone(),
                     "nullish coalescing operator `??` (stage 1.2)",
                 )),
                 _ => {
-                    compile_expr(&i.left, chunk)?;
-                    compile_expr(i.right.as_ref().unwrap(), chunk)?;
+                    compile_expr(&i.left, chunk, resolutions)?;
+                    compile_expr(i.right.as_ref().unwrap(), chunk, resolutions)?;
                     let op = binary_opcode(&i.op).ok_or_else(|| {
                         unsupported(i.pos.clone(), &format!("infix operator `{}`", i.op))
                     })?;
@@ -831,18 +896,18 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
 
         // —— function call (callee + args, then CALL) ——
         Expr::Call(c) => {
-            compile_expr(&c.callee, chunk)?;
+            compile_expr(&c.callee, chunk, resolutions)?;
             if c.args.iter().any(|arg| matches!(arg, Expr::Spread(_))) {
                 chunk.write_op(Opcode::NewArray, c.pos.clone());
                 chunk.write_u16(0, c.pos.clone());
                 for arg in &c.args {
                     match arg {
                         Expr::Spread(sp) => {
-                            compile_expr(&sp.value, chunk)?;
+                            compile_expr(&sp.value, chunk, resolutions)?;
                             chunk.write_op(Opcode::Spread, sp.pos.clone());
                         }
                         _ => {
-                            compile_expr(arg, chunk)?;
+                            compile_expr(arg, chunk, resolutions)?;
                             chunk.write_op(Opcode::PushArg, arg.pos());
                         }
                     }
@@ -851,7 +916,7 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
                 return Ok(());
             }
             for arg in &c.args {
-                compile_expr(arg, chunk)?;
+                compile_expr(arg, chunk, resolutions)?;
             }
             let arg_count = c.args.len() as u16;
             chunk.write_op(Opcode::Call, c.pos.clone());
@@ -859,9 +924,9 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
             Ok(())
         }
         Expr::Member(m) => {
-            compile_expr(&m.object, chunk)?;
+            compile_expr(&m.object, chunk, resolutions)?;
             if m.computed {
-                compile_expr(&m.property, chunk)?;
+                compile_expr(&m.property, chunk, resolutions)?;
                 chunk.write_op(Opcode::GetIndex, m.pos.clone());
             } else {
                 let name = object_property_key_expr(&m.property);
@@ -875,15 +940,15 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
             Ok(())
         }
         Expr::Index(i) => {
-            compile_expr(&i.left, chunk)?;
-            compile_expr(&i.index, chunk)?;
+            compile_expr(&i.left, chunk, resolutions)?;
+            compile_expr(&i.index, chunk, resolutions)?;
             chunk.write_op(Opcode::GetIndex, i.pos.clone());
             Ok(())
         }
         Expr::New(n) => {
-            compile_expr(&n.callee, chunk)?;
+            compile_expr(&n.callee, chunk, resolutions)?;
             for arg in &n.args {
-                compile_expr(arg, chunk)?;
+                compile_expr(arg, chunk, resolutions)?;
             }
             chunk.write_op(Opcode::New, n.pos.clone());
             chunk.write_u16(n.args.len() as u16, n.pos.clone());
@@ -900,6 +965,7 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
                 f.return_t.clone(),
                 f.pos.clone(),
                 chunk,
+                resolutions,
             )?;
             chunk.write_op(Opcode::Closure, f.pos.clone());
             chunk.write_u16(idx, f.pos.clone());
@@ -930,6 +996,7 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
                 a.return_t.clone(),
                 a.pos.clone(),
                 chunk,
+                resolutions,
             )?;
             chunk.write_op(Opcode::Closure, a.pos.clone());
             chunk.write_u16(idx, a.pos.clone());
@@ -972,7 +1039,11 @@ fn object_property_key_expr(expr: &Expr) -> String {
 ///
 /// Stage 1 supports `name = expr` and compound `name <op>= expr` for an
 /// identifier target. Member/index assignment is stage 5.
-fn compile_assign(a: &crate::ast::AssignExpr, chunk: &mut Chunk) -> Result<(), Object> {
+fn compile_assign(
+    a: &crate::ast::AssignExpr,
+    chunk: &mut Chunk,
+    resolutions: &ResolutionMap,
+) -> Result<(), Object> {
     let name = match &a.left {
         Expr::Ident(i) => i.name.clone(),
         _ => {
@@ -983,7 +1054,7 @@ fn compile_assign(a: &crate::ast::AssignExpr, chunk: &mut Chunk) -> Result<(), O
         }
     };
     if a.op == "=" {
-        compile_expr(&a.right, chunk)?;
+        compile_expr(&a.right, chunk, resolutions)?;
         // DUP so the assigned value is both stored and left on the stack as
         // the expression result (assignment evaluates to the value).
         chunk.write_op(Opcode::Dup, a.pos.clone());
@@ -997,7 +1068,7 @@ fn compile_assign(a: &crate::ast::AssignExpr, chunk: &mut Chunk) -> Result<(), O
         let name_idx_load = chunk.add_constant(str_obj(name.clone()));
         chunk.write_op(Opcode::LoadName, a.pos.clone());
         chunk.write_u16(name_idx_load, a.pos.clone());
-        compile_expr(&a.right, chunk)?;
+        compile_expr(&a.right, chunk, resolutions)?;
         // Strip the `=` suffix to get the binary op (`+=` → `+`).
         let bin_op: String = a.op[..a.op.len() - 1].to_string();
         let op = binary_opcode(&bin_op).ok_or_else(|| {
@@ -1035,7 +1106,11 @@ fn binary_opcode(op: &str) -> Option<Opcode> {
 
 /// Lower `left && right`: keep left if falsy, else replace with right.
 /// Pre: left is already on the stack.
-fn compile_and(i: &crate::ast::InfixExpr, chunk: &mut Chunk) -> Result<(), Object> {
+fn compile_and(
+    i: &crate::ast::InfixExpr,
+    chunk: &mut Chunk,
+    resolutions: &ResolutionMap,
+) -> Result<(), Object> {
     let pos = i.pos.clone();
     //   <left>            ; stack: [L]
     //   DUP               ; stack: [L, L]
@@ -1046,14 +1121,18 @@ fn compile_and(i: &crate::ast::InfixExpr, chunk: &mut Chunk) -> Result<(), Objec
     chunk.write_op(Opcode::Dup, pos.clone());
     let patch_ip = emit_jump_placeholder(chunk, Opcode::JumpIfFalse, pos.clone());
     chunk.write_op(Opcode::Pop, pos.clone());
-    compile_expr(i.right.as_ref().unwrap(), chunk)?;
+    compile_expr(i.right.as_ref().unwrap(), chunk, resolutions)?;
     patch_jump_here(chunk, patch_ip);
     Ok(())
 }
 
 /// Lower `left || right`: keep left if truthy, else replace with right.
 /// Pre: left is already on the stack.
-fn compile_or(i: &crate::ast::InfixExpr, chunk: &mut Chunk) -> Result<(), Object> {
+fn compile_or(
+    i: &crate::ast::InfixExpr,
+    chunk: &mut Chunk,
+    resolutions: &ResolutionMap,
+) -> Result<(), Object> {
     let pos = i.pos.clone();
     //   <left>                  ; stack: [L]
     //   DUP                     ; stack: [L, L]
@@ -1067,7 +1146,7 @@ fn compile_or(i: &crate::ast::InfixExpr, chunk: &mut Chunk) -> Result<(), Object
     let to_end = emit_jump_placeholder(chunk, Opcode::Jump, pos.clone());
     patch_jump_here(chunk, to_right);
     chunk.write_op(Opcode::Pop, pos.clone());
-    compile_expr(i.right.as_ref().unwrap(), chunk)?;
+    compile_expr(i.right.as_ref().unwrap(), chunk, resolutions)?;
     patch_jump_here(chunk, to_end);
     Ok(())
 }
@@ -1180,6 +1259,31 @@ mod tests {
         assert!(
             result.is_err(),
             "try/catch should not compile before stage 6"
+        );
+    }
+
+    #[test]
+    fn function_proto_records_resolved_upvalues() {
+        let chunk = compile_src(
+            "function outer() { let x = 1; function inner() { return x; } return inner; }",
+        );
+        let outer = chunk
+            .protos
+            .iter()
+            .find(|proto| proto.name == "outer")
+            .expect("outer proto");
+        let outer_chunk = outer.chunk.borrow().clone().expect("outer chunk");
+        let inner = outer_chunk
+            .protos
+            .iter()
+            .find(|proto| proto.name == "inner")
+            .expect("inner proto");
+
+        assert_eq!(inner.upvalue_desc.len(), 1);
+        assert_eq!(inner.upvalue_desc[0].name, "x");
+        assert_eq!(
+            inner.upvalue_desc[0].source,
+            crate::bytecode::closure::UpvalueSource::LocalSlot(1)
         );
     }
 }

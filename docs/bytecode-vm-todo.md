@@ -137,8 +137,8 @@
 
 - [x] 4.1 `Upvalue` 两态模型：开放（指向外层栈槽）/ 闭合（迁移到 `Rc<RefCell<Object>>`）
   - 证据：新增 `src/bytecode/upvalue.rs`，实现 `UpvalueState::Open { slot }` 与 `UpvalueState::Closed(Rc<RefCell<Object>>)`；单测 `bytecode::upvalue::tests::open_upvalue_reads_and_writes_stack_slot`、`bytecode::upvalue::tests::closing_detaches_value_from_stack_slot` 通过；`cargo test --lib bytecode` 输出 73 passed
-- [ ] 4.2 编译器变量解析 pass：局部槽 / upvalue / 转发 upvalue / 全局 四态
-  - 证据：（待填）
+- [x] 4.2 编译器变量解析 pass：局部槽 / upvalue / 转发 upvalue / 全局 四态
+  - 证据：新增 `src/bytecode/resolve.rs` 独立词法解析单元，记录 `ResolvedBinding::{LocalSlot, Upvalue, Global}` 且 `UpvalueSource::{LocalSlot, ParentUpvalue}` 覆盖直接/转发 upvalue；`compile()` 入口运行 `resolve_program()`，`compile_function_proto()` 将解析出的 `upvalue_desc` 写入 `FunctionProto`；单测 `bytecode::resolve::tests::{resolves_locals_and_globals,records_direct_upvalue_from_parent_local,records_forwarded_upvalue_through_intermediate_function}` 与 `bytecode::compiler::tests::function_proto_records_resolved_upvalues` 通过；`cargo test --lib bytecode` 输出 77 passed；`cargo test --test bytecode_parity -- --nocapture` passed
 - [ ] 4.3 Interp 维护 `open_upvalues: BTreeMap<slot_idx, Vec<Rc<Upvalue>>>`，帧退出时闭合
   - 证据：（待填）
 - [ ] 4.4 实现 `OpLoadUpvalue/StoreUpvalue`，`OpClosure` 运行期抓取
@@ -273,10 +273,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4.1 已新增 `src/bytecode/upvalue.rs` 两态 Upvalue 模型
-**下一条 TODO**：继续阶段 4，推进 4.2 编译器变量解析 pass：局部槽 / upvalue / 转发 upvalue / 全局 四态
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4.1 已新增 `src/bytecode/upvalue.rs` 两态 Upvalue 模型；阶段 4.2 已新增 `src/bytecode/resolve.rs` 并把函数 upvalue 描述接入 `FunctionProto`
+**下一条 TODO**：继续阶段 4，推进 4.3 `Interp` 维护 `open_upvalues: BTreeMap<slot_idx, Vec<Rc<Upvalue>>>`，帧退出时闭合
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 4.1 Upvalue 两态模型证据：`src/bytecode/upvalue.rs`，`cargo test --lib bytecode` 73 passed；阶段 3 参数/调用证据：`function-arguments=3:a:c:a`、`function-spread-call=a:b:c`；`cargo test --test bytecode_parity -- --nocapture` passed；2.7 分配证据仍为 tree_walk=1,000,003 allocs，bytecode_vm=15 allocs，ratio=66,666.9x）
+**最后更新**：2026-06-22（阶段 4.2 解析 pass 证据：`src/bytecode/resolve.rs`，`bytecode::compiler::tests::function_proto_records_resolved_upvalues`，`cargo test --lib bytecode` 77 passed，`cargo test --test bytecode_parity -- --nocapture` passed；阶段 4.1 Upvalue 两态模型证据：`src/bytecode/upvalue.rs`；阶段 3 参数/调用证据：`function-arguments=3:a:c:a`、`function-spread-call=a:b:c`；2.7 分配证据仍为 tree_walk=1,000,003 allocs，bytecode_vm=15 allocs，ratio=66,666.9x）
 
 ---
 
