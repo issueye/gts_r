@@ -122,10 +122,12 @@ pub enum Opcode {
     New = 79,
     /// Convert the top value to an array of for-in keys.
     IterKeys = 80,
-    /// Convert the top value to an array of for-of values.
+    /// Convert the top value to a for-of iterator through Symbol.iterator.
     IterValues = 81,
     /// Push the length/size of the top collection-like value.
     Len = 82,
+    /// Advance the top iterator and push its `{ value, done }` record.
+    IterNext = 83,
 
     // —— errors / async ——
     Throw = 90,
@@ -217,6 +219,7 @@ impl Opcode {
             80 => Opcode::IterKeys,
             81 => Opcode::IterValues,
             82 => Opcode::Len,
+            83 => Opcode::IterNext,
             90 => Opcode::Throw,
             91 => Opcode::Await,
             92 => Opcode::ToString,
@@ -296,6 +299,7 @@ impl Opcode {
             Opcode::IterKeys => "ITER_KEYS",
             Opcode::IterValues => "ITER_VALUES",
             Opcode::Len => "LEN",
+            Opcode::IterNext => "ITER_NEXT",
             Opcode::Throw => "THROW",
             Opcode::Await => "AWAIT",
             Opcode::ToString => "TO_STRING",

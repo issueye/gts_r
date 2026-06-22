@@ -489,22 +489,44 @@ impl<'a> VmState<'a> {
                 let assigned = assign_index(&obj, &key, value, pos)?;
                 self.stack.push(assigned);
             }
-            Opcode::IterKeys | Opcode::IterValues => {
+            Opcode::IterKeys => {
                 let pos = self.chunk.position_at(self.ip - 1);
                 let value = self
                     .stack
                     .pop()
                     .ok_or_else(|| self.stack_underflow(pos.clone()))?;
-                let elements = match op {
-                    Opcode::IterKeys => crate::evaluator::eval_core::iterable_keys(&value)
-                        .into_iter()
-                        .map(str_obj)
-                        .collect(),
-                    Opcode::IterValues => crate::evaluator::eval_core::iterable_values(&value),
-                    _ => unreachable!(),
-                };
+                let elements = crate::evaluator::eval_core::iterable_keys(&value)
+                    .into_iter()
+                    .map(str_obj)
+                    .collect();
                 self.stack
                     .push(Object::Array(Rc::new(RefCell::new(ArrayData { elements }))));
+            }
+            Opcode::IterValues => {
+                let pos = self.chunk.position_at(self.ip - 1);
+                let value = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                let iterator =
+                    crate::evaluator::iterator::get_iterator(&value, &self.env, pos.clone());
+                if iterator.is_runtime_error() {
+                    return Err(iterator);
+                }
+                self.stack.push(iterator);
+            }
+            Opcode::IterNext => {
+                let pos = self.chunk.position_at(self.ip - 1);
+                let iterator = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                let next =
+                    crate::evaluator::iterator::iterator_next(&iterator, &self.env, pos.clone());
+                if next.is_runtime_error() {
+                    return Err(next);
+                }
+                self.stack.push(next);
             }
             Opcode::Len => {
                 let pos = self.chunk.position_at(self.ip - 1);

@@ -705,7 +705,7 @@ fn eval_call(c: &CallExpr, env: &EnvRef) -> Object {
         }
         return super::methods::call_super_constructor(env, &args, c.pos.clone());
     }
-    // Method call: obj.method(...) — capture `this`.
+    // Method call: obj.method(...) / obj[key](...) — capture `this`.
     let (callee, this_val) = match &c.callee {
         Expr::Member(m) => {
             // super.method(...): resolve against the parent class while keeping
@@ -736,6 +736,18 @@ fn eval_call(c: &CallExpr, env: &EnvRef) -> Object {
                 let func = super::methods::get_property(&obj, &name, c.pos.clone());
                 (func, Some(obj))
             }
+        }
+        Expr::Index(i) => {
+            let obj = eval_expr(&i.left, env);
+            if obj.is_runtime_error() {
+                return obj;
+            }
+            let key = eval_expr(&i.index, env);
+            if key.is_runtime_error() {
+                return key;
+            }
+            let func = super::methods::get_index(&obj, &key, c.pos.clone());
+            (func, Some(obj))
         }
         _ => (eval_expr(&c.callee, env), None),
     };

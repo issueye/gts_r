@@ -87,8 +87,8 @@
   - 证据：LoopFrame + compile_break_continue 收集待回填跳转，循环结束时 patch 到 end(while)或 post_start(for)
 - [x] 2.3 `For/While` 编译；`If/Else` 跳转
   - 证据：compile_if/compile_while/compile_for；修了 for-continue 的 post_start 偏移 bug(原本指向 body 起点导致死循环)；Stmt::Block + 表达式语句 keep_value 语义(顶层末语句保留值,其余 pop)
-- [x] 2.4 迭代器协议：`ForIn`（遍历 key）、`ForOf`（遍历 value），支持 Array/String/Map/Set
-  - 证据：新增 `Opcode::IterKeys/IterValues/Len` + 编译器 `compile_for_iter` 将 ForIn/ForOf 降为普通索引循环；interp 复用 `iterable_keys/iterable_values` 并支持 Array/String/Hash/Map/Set；`for_of_array` fixture 覆盖 Array/String/Map/Set 值遍历，`for_in_object` 覆盖对象 key 遍历；`cargo test --test bytecode_parity -- --nocapture` ok
+- [x] 2.4 迭代器协议：`ForIn`（遍历 key）、`ForOf`（通过 `Symbol.iterator` 遍历 value），支持 Array/String/Hash/Map/Set
+  - 证据：`Symbol.iterator` 暴露为全局 `Symbol.iterator` 键；默认迭代器返回 `{ value, done }`；`ForOf` 编译为 `IterValues` 取迭代器 + `IterNext` 推进，不再预展开为数组索引循环；`for_of_array` 覆盖 Array/String/Map/Set，`symbol_iterator` 覆盖直接 `x[Symbol.iterator]().next()`，`custom_symbol_iterator` 覆盖自定义迭代器；`cargo test --test bytecode_parity -- --nocapture` ok
 - [x] 2.5 **补 fixture**（先在树遍历下验证绿）：`for_in_object`、`for_of_array`、`labeled_break`
   - 证据：新增 `tests/fixtures/parity/{for_in_object,for_of_array,labeled_break}/main.gs`；树遍历 CLI 输出分别为 `for-in-object=abc`、`for-of-array=6:go:5:xy`、`labeled-break=1`
 - [x] 2.6 阶段 2 契约门（VM 单跑全绿）：

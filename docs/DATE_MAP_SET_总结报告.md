@@ -151,7 +151,7 @@ new Date(year, month, day, hour, minute, second, millisecond)  // 完整
 ### 实现差异（设计选择）
 - 键/值比较使用字符串表示（inspect()）
 - Date 统一使用 UTC 时区（无本地时区）
-- 无迭代器协议（返回数组代替）
+- `Symbol.iterator` 已支持默认 value 迭代；`keys()`/`values()`/`entries()` 仍返回数组
 - Date 不可变（无 setter 方法）
 
 ## 质量保证

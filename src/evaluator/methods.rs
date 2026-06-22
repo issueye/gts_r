@@ -9,6 +9,7 @@ use crate::object::*;
 
 use super::eval_core::eval_block;
 use super::expressions::{apply_function, bind_params, eval_expr, is_error_class_name};
+use super::iterator::{default_iterator_method, get_iterator_index, SYMBOL_ITERATOR_KEY};
 
 /// Read a named property of a value, dispatching on the value's type.
 pub fn get_property(obj: &Object, name: &str, pos: Position) -> Object {
@@ -21,6 +22,9 @@ pub fn get_property(obj: &Object, name: &str, pos: Position) -> Object {
             if let Some(proto) = hb.proto.clone() {
                 drop(hb);
                 return get_property(&proto, name, pos);
+            }
+            if name == SYMBOL_ITERATOR_KEY {
+                return default_iterator_method(Object::Hash(h.clone()), "Object.Symbol.iterator");
             }
             if name == "hasOwnProperty" {
                 let target = Object::Hash(h.clone());
@@ -106,6 +110,9 @@ pub fn get_property(obj: &Object, name: &str, pos: Position) -> Object {
             if name == "length" {
                 return Object::Number(s.chars().count() as f64);
             }
+            if name == SYMBOL_ITERATOR_KEY {
+                return default_iterator_method(obj.clone(), "String.Symbol.iterator");
+            }
             if let Some(f) = string_method(name) {
                 return Object::Builtin(Rc::new(Builtin {
                     name: format!("String.{}", name),
@@ -131,6 +138,9 @@ pub fn get_property(obj: &Object, name: &str, pos: Position) -> Object {
         Object::Array(a) => {
             if name == "length" {
                 return Object::Number(a.borrow_mut().elements.len() as f64);
+            }
+            if name == SYMBOL_ITERATOR_KEY {
+                return default_iterator_method(obj.clone(), "Array.Symbol.iterator");
             }
             if let Some(f) = array_method(name) {
                 return Object::Builtin(Rc::new(Builtin {
@@ -210,6 +220,9 @@ pub fn get_property(obj: &Object, name: &str, pos: Position) -> Object {
             if name == "size" {
                 return Object::Number(m.borrow().size() as f64);
             }
+            if name == SYMBOL_ITERATOR_KEY {
+                return default_iterator_method(obj.clone(), "Map.Symbol.iterator");
+            }
             if let Some(f) = map_method(name) {
                 return Object::Builtin(Rc::new(Builtin {
                     name: format!("Map.{}", name),
@@ -222,6 +235,9 @@ pub fn get_property(obj: &Object, name: &str, pos: Position) -> Object {
         Object::Set(s) => {
             if name == "size" {
                 return Object::Number(s.borrow().size() as f64);
+            }
+            if name == SYMBOL_ITERATOR_KEY {
+                return default_iterator_method(obj.clone(), "Set.Symbol.iterator");
             }
             if let Some(f) = set_method(name) {
                 return Object::Builtin(Rc::new(Builtin {
@@ -245,6 +261,9 @@ pub fn get_property(obj: &Object, name: &str, pos: Position) -> Object {
 
 /// Read an indexed value (arr[i], obj[key], str[i]).
 pub fn get_index(obj: &Object, key: &Object, pos: Position) -> Object {
+    if let Some(iterator) = get_iterator_index(obj, key, pos.clone()) {
+        return iterator;
+    }
     match obj {
         Object::Array(a) => {
             if let Object::Number(n) = key {

@@ -51,6 +51,7 @@ pub fn register_globals(vm: &Rc<VirtualMachine>) {
     vm.set_global("String", string_global());
     vm.set_global("Number", number_global());
     vm.set_global("Boolean", boolean_global());
+    vm.set_global("Symbol", super::iterator::symbol_global());
 
     // Error constructors.
     for name in [
@@ -634,13 +635,9 @@ fn array_global() -> Object {
         );
         h.set(
             "from",
-            native("Array.from", |_ctx, args| match args.first() {
-                Some(Object::Array(a)) => Object::Array(a.clone()),
-                Some(Object::String(s)) => {
-                    let elems: Vec<Object> = s.chars().map(|c| str_obj(c.to_string())).collect();
-                    Object::Array(Rc::new(RefCell::new(ArrayData { elements: elems })))
-                }
-                _ => Object::Array(Rc::new(RefCell::new(ArrayData::default()))),
+            native("Array.from", |ctx, args| match args.first() {
+                Some(value) => super::iterator::collect_iterable(value, ctx.env, ctx.pos.clone()),
+                None => Object::Array(Rc::new(RefCell::new(ArrayData::default()))),
             }),
         );
         h.set(

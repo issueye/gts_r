@@ -277,11 +277,29 @@ fn eval_for_of(s: &ForOfStmt, env: &EnvRef) -> Object {
     if iterable.is_runtime_error() {
         return iterable;
     }
-    let values = iterable_values(&iterable);
+    let iterator = crate::evaluator::iterator::get_iterator(&iterable, env, s.pos.clone());
+    if iterator.is_runtime_error() {
+        return iterator;
+    }
     let scope = Environment::child(env);
-    for value in values {
+    loop {
         if let Some(timeout) = env.borrow().vm.check_timeout(s.pos.clone()) {
             return timeout;
+        }
+        let next = crate::evaluator::iterator::iterator_next(&iterator, env, s.pos.clone());
+        if next.is_runtime_error() {
+            return next;
+        }
+        let done = crate::evaluator::iterator::iterator_done(&next, s.pos.clone());
+        if done.is_runtime_error() {
+            return done;
+        }
+        if done.is_truthy() {
+            break;
+        }
+        let value = crate::evaluator::iterator::iterator_value(&next, s.pos.clone());
+        if value.is_runtime_error() {
+            return value;
         }
         scope.borrow_mut().set_here(s.name.clone(), value);
         let body_scope = Environment::child(&scope);
@@ -327,33 +345,6 @@ pub fn iterable_keys(obj: &Object) -> Vec<String> {
             .entries
             .iter()
             .map(|(_, value)| value.inspect())
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
-/// Extract the values of an iterable (for-of).
-pub fn iterable_values(obj: &Object) -> Vec<Object> {
-    match obj {
-        Object::Array(a) => a.borrow_mut().elements.clone(),
-        Object::Hash(h) => h
-            .borrow_mut()
-            .entries
-            .iter()
-            .map(|(_, v)| v.clone())
-            .collect(),
-        Object::String(s) => s.chars().map(|c| str_obj(c.to_string())).collect(),
-        Object::Map(m) => m
-            .borrow()
-            .entries
-            .iter()
-            .map(|(_, _, value)| value.clone())
-            .collect(),
-        Object::Set(s) => s
-            .borrow()
-            .entries
-            .iter()
-            .map(|(_, value)| value.clone())
             .collect(),
         _ => Vec::new(),
     }

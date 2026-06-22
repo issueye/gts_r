@@ -104,22 +104,20 @@ fn compile_stmt(
         Stmt::If(s) => compile_if(s, chunk, loops, keep_value, resolutions),
         Stmt::While(s) => compile_while(s, None, chunk, loops, keep_value, resolutions),
         Stmt::For(s) => compile_for(s, None, chunk, loops, keep_value, resolutions),
-        Stmt::ForIn(s) => compile_for_iter(
+        Stmt::ForIn(s) => compile_for_in(
             &s.name,
             &s.iterable,
             &s.body,
-            Opcode::IterKeys,
             s.pos.clone(),
             None,
             chunk,
             loops,
             resolutions,
         ),
-        Stmt::ForOf(s) => compile_for_iter(
+        Stmt::ForOf(s) => compile_for_of(
             &s.name,
             &s.iterable,
             &s.body,
-            Opcode::IterValues,
             s.pos.clone(),
             None,
             chunk,
@@ -504,11 +502,10 @@ fn compile_for(
     Ok(())
 }
 
-fn compile_for_iter(
+fn compile_for_in(
     name: &str,
     iterable: &Expr,
     body: &crate::ast::BlockStmt,
-    iter_op: Opcode,
     pos: crate::ast::Position,
     label: Option<String>,
     chunk: &mut Chunk,
@@ -521,7 +518,7 @@ fn compile_for_iter(
 
     // items = ITER_KEYS/ITER_VALUES(iterable)
     compile_expr(iterable, chunk, resolutions)?;
-    chunk.write_op(iter_op, pos.clone());
+    chunk.write_op(Opcode::IterKeys, pos.clone());
     let items_idx = chunk.add_constant(str_obj(items_name.clone()));
     chunk.write_op(Opcode::StoreName, pos.clone());
     chunk.write_u16(items_idx, pos.clone());
@@ -583,6 +580,70 @@ fn compile_for_iter(
     Ok(())
 }
 
+fn compile_for_of(
+    name: &str,
+    iterable: &Expr,
+    body: &crate::ast::BlockStmt,
+    pos: crate::ast::Position,
+    label: Option<String>,
+    chunk: &mut Chunk,
+    loops: &mut Vec<LoopFrame>,
+    resolutions: &ResolutionMap,
+) -> Result<(), Object> {
+    let suffix = format!("{}_{}", pos.line, pos.col);
+    let iter_name = format!("__gts_bc_iter_{}", suffix);
+    let next_name = format!("__gts_bc_iter_next_{}", suffix);
+
+    compile_expr(iterable, chunk, resolutions)?;
+    chunk.write_op(Opcode::IterValues, pos.clone());
+    let iter_idx = chunk.add_constant(str_obj(iter_name.clone()));
+    chunk.write_op(Opcode::StoreName, pos.clone());
+    chunk.write_u16(iter_idx, pos.clone());
+
+    let start = chunk.code.len() as u32;
+    emit_load_name(chunk, &iter_name, pos.clone());
+    chunk.write_op(Opcode::IterNext, pos.clone());
+    let next_idx = chunk.add_constant(str_obj(next_name.clone()));
+    chunk.write_op(Opcode::StoreName, pos.clone());
+    chunk.write_u16(next_idx, pos.clone());
+
+    emit_load_name(chunk, &next_name, pos.clone());
+    let done_idx = chunk.add_constant(str_obj("done"));
+    chunk.write_op(Opcode::GetProperty, pos.clone());
+    chunk.write_u16(done_idx, pos.clone());
+    let to_end = emit_jump_placeholder(chunk, Opcode::JumpIfTrue, pos.clone());
+
+    emit_load_name(chunk, &next_name, pos.clone());
+    let value_idx = chunk.add_constant(str_obj("value"));
+    chunk.write_op(Opcode::GetProperty, pos.clone());
+    chunk.write_u16(value_idx, pos.clone());
+    let name_idx = chunk.add_constant(str_obj(name.to_string()));
+    chunk.write_op(Opcode::StoreName, pos.clone());
+    chunk.write_u16(name_idx, pos.clone());
+
+    loops.push(LoopFrame {
+        label,
+        ..LoopFrame::default()
+    });
+    for stmt in &body.statements {
+        compile_stmt(stmt, chunk, loops, false, resolutions)?;
+    }
+    let frame = loops.pop().unwrap();
+
+    chunk.write_op(Opcode::Loop, pos.clone());
+    chunk.write_u32(start, pos.clone());
+
+    let end = chunk.code.len() as u32;
+    patch_jump_here(chunk, to_end);
+    for b in &frame.breaks {
+        patch_jump_to(chunk, *b, end);
+    }
+    for c in &frame.continues {
+        patch_jump_to(chunk, *c, start);
+    }
+    Ok(())
+}
+
 fn compile_labeled(
     s: &crate::ast::LabeledStmt,
     chunk: &mut Chunk,
@@ -607,22 +668,20 @@ fn compile_labeled(
             keep_value,
             resolutions,
         ),
-        Stmt::ForIn(f) => compile_for_iter(
+        Stmt::ForIn(f) => compile_for_in(
             &f.name,
             &f.iterable,
             &f.body,
-            Opcode::IterKeys,
             f.pos.clone(),
             Some(s.label.clone()),
             chunk,
             loops,
             resolutions,
         ),
-        Stmt::ForOf(f) => compile_for_iter(
+        Stmt::ForOf(f) => compile_for_of(
             &f.name,
             &f.iterable,
             &f.body,
-            Opcode::IterValues,
             f.pos.clone(),
             Some(s.label.clone()),
             chunk,

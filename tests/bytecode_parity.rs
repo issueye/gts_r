@@ -132,6 +132,14 @@ fn all_parity_fixtures() -> Vec<Fixture> {
             expected: "for-of-array=6:go:5:xy\n",
         },
         Fixture {
+            dir: "symbol_iterator",
+            expected: "symbol-iterator=1:2:true:go:true:xy\n",
+        },
+        Fixture {
+            dir: "custom_symbol_iterator",
+            expected: "custom-symbol-iterator=60:10|20|30\n",
+        },
+        Fixture {
             dir: "labeled_break",
             expected: "labeled-break=1\n",
         },

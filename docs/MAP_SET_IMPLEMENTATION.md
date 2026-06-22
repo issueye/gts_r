@@ -140,8 +140,8 @@ Added public exports:
 
 ### Differences from JavaScript
 - Keys/values compared by string representation (`inspect()`)
-- No iterator protocol (returns Arrays instead)
-- No `[Symbol.iterator]` support
+- `Symbol.iterator` is supported for default value iteration
+- `keys()`/`values()`/`entries()` still return Arrays for compatibility with existing helpers
 - Single-threaded, no concurrent access considerations
 
 ## Code Quality
