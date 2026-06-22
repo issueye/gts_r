@@ -234,7 +234,8 @@
 - [x] 8.4 阶段 8 契约门（VM 单跑全绿）：
   - [x] `relative_require` `nested_relative_require` `project_module_require` `directory_module_index` `module_cache` `module_exports_object` `import_default_like` `export_const` `export_function_alias`
   - 证据：`tests/bytecode_modules.rs::bytecode_vm_matches_stage_8_module_fixtures` 使用真实 fixture 文件路径在 `EXEC_MODE_BYTECODE` 下运行模块门禁，覆盖 `relative_require`、`nested_relative_require`、`project_module_require`、`directory_module_index`、`module_cache`、`module_exports_object`、`import_default_like`、`export_const`、`export_function_alias` 并逐字节断言 stdout；`cargo test --test bytecode_modules -- --nocapture` 输出 2 passed（含 8.3 循环 require 专项）
-- [ ] 8.5 覆盖度核对：`Import/Export` 打勾
+- [x] 8.5 覆盖度核对：`Import/Export` 打勾
+  - 证据：`src/bytecode/compiler.rs` 的 `compile_stmt` 覆盖 `Stmt::Import`/`Stmt::Export`；`compile_import` 覆盖 default、namespace、named、alias 绑定并生成 `ImportModule` + `Dup/GetProperty/StoreName`；`compile_export` 覆盖 named declaration、`export default <expr>`、local alias export 与 `export { ... } from "..."` re-export，并生成 `ExportName`；`src/bytecode/interp.rs` 已实现 `ImportModule` 调用 `ImporterFn` 与 `ExportName` 写入当前模块 exports；`tests/bytecode_modules.rs::bytecode_vm_matches_stage_8_module_fixtures` 覆盖 `import_default_like`、`export_const`、`export_function_alias` 以及 require/module cache 相关模块路径；验证命令：`cargo fmt --all --check` passed、`cargo test --test bytecode_modules -- --nocapture` 2 passed、`cargo test --lib bytecode` 107 passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed
 - [ ] 8.6 提交 `[bytecode-8] 模块系统`
 
 ---
@@ -280,10 +281,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7 Match 全集与类型注解已完成并收口；阶段 8.1 Import 编译已完成；阶段 8.2 Export 编译已完成；阶段 8.3 循环依赖检测已完成；阶段 8.4 模块系统契约门已完成
-**下一条 TODO**：继续阶段 8，推进 8.5 覆盖度核对：`Import/Export` 打勾
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7 Match 全集与类型注解已完成并收口；阶段 8.1 Import 编译已完成；阶段 8.2 Export 编译已完成；阶段 8.3 循环依赖检测已完成；阶段 8.4 模块系统契约门已完成；阶段 8.5 Import/Export 覆盖度核对已完成
+**下一条 TODO**：继续阶段 8，推进 8.6 提交 `[bytecode-8] 模块系统`
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 8.4 已完成：模块相关 fixture 在 bytecode 模式真实文件路径下全绿；下一步推进 Import/Export 覆盖度核对）
+**最后更新**：2026-06-22（阶段 8.5 已完成：Import/Export 编译、解释器 opcode、fixture 覆盖已核对；下一步收口阶段 8）
 
 ---
 
