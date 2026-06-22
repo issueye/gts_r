@@ -57,8 +57,8 @@
 
 - [x] 1.1 完善运算符指令：`Sub/Mul/Div/Mod/Pow/Eq/Neq/Lt/Le/Gt/Ge` + 逻辑短路 `JumpIfFalse/JumpIfTrue` + `Not/Neg/Concat`
   - 证据：compiler 覆盖全部算术/比较运算符 + `&&`/`||` 短路(Dup+条件跳转) + Prefix `!`/`-` + Bool/Null/Undefined 字面量；interp 复用 evaluator 新增的 `apply_binary_op`/`apply_unary_op`(pub,保证与树遍历逐字节一致)；`cargo test --lib bytecode` 31 passed(每个运算符 + 短路返回操作数值语义)；`cargo clippy --lib` 0 error；回归 `cargo test --tests` 259 passed/26 suites 全绿。`??` 与 bitwise/instanceof/in 推迟到对应 fixture 到达时(1.2/后续阶段)
-- [ ] 1.2 字面量编译：`Bool/Null/Undefined/Template/Regexp`（Template/Regexp 编译期求值或下沉）
-  - 证据：（待填）
+- [x] 1.2 字面量编译：`Bool/Null/Undefined/Template/Regexp`（Template/Regexp 编译期求值或下沉）
+  - 证据：compiler 接入 `eval_string_lit`/`eval_regexp_lit`(纯函数,编译期求值) + 新增 `eval_template_static`(静态模板,无 `${}`)；Bool/Null/Undefined 随 1.1 完成；interp 36 passed(含 string 拼接/转义/严格相等/静态模板)；`${}` 插值模板推迟到 1.3(依赖变量查找)
 - [ ] 1.3 变量声明与存取：`Let/Const/Var` → 全局名字表；`OpLoadGlobal/StoreGlobal`
   - 证据：（待填）
 - [ ] 1.4 标识符读取：先统一走 `OpLoadName`（动态查找），阶段 4 再优化为槽/upvalue
@@ -267,10 +267,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 1 进行中（1.1 运算符全集已完成）
-**下一条 TODO**：1.2（字面量编译 Bool/Null/Undefined/Template/Regexp —— 其中 Bool/Null/Undefined 已随 1.1 完成，剩 String/Template/Regexp）
+**当前阶段**：阶段 1 进行中（1.1 运算符 + 1.2 String/Regexp/静态模板 已完成）
+**下一条 TODO**：1.3（变量声明与存取 Let/Const/Var → 全局名字表 + LoadGlobal/StoreGlobal/LoadName，解锁 ${} 插值模板）
 **阻断**：无
-**最后更新**：2026-06-22（1.1 全绿，待提交）
+**最后更新**：2026-06-22（1.2 全绿，待提交）
 
 ---
 

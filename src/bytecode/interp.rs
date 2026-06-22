@@ -350,8 +350,34 @@ mod tests {
         assert!(matches!(run_src("undefined || 42"), Object::Number(n) if n == 42.0));
     }
 
-    // Note: string concatenation (`"foo" + "bar"`) is exercised in stage 1.2
-    // once String literals compile. The shared `apply_binary_op("+")` path
-    // already handles string+string; it just has no driver test until
-    // `Expr::String` is supported by the compiler.
+    // —— string literals + concatenation (stage 1.2) ——
+    #[test]
+    fn string_literal() {
+        assert!(matches!(run_src("\"hello\""), Object::String(s) if &*s == "hello"));
+    }
+    #[test]
+    fn string_literal_escape() {
+        // \n is processed at compile time, mirroring eval_string_lit
+        assert!(matches!(run_src("\"a\\nb\""), Object::String(s) if &*s == "a\nb"));
+    }
+    #[test]
+    fn string_concat_now_supported() {
+        // Previously deferred; String literals now compile so `+` routes
+        // through apply_binary_op("+") which handles string+string.
+        assert!(matches!(run_src("\"foo\" + \"bar\""), Object::String(s) if &*s == "foobar"));
+    }
+    #[test]
+    fn string_strict_equal() {
+        assert!(matches!(run_src("\"a\" === \"a\""), Object::Boolean(true)));
+        assert!(matches!(run_src("\"a\" === \"b\""), Object::Boolean(false)));
+    }
+    #[test]
+    fn static_template_literal() {
+        // Backtick template with no interpolation reduces to a string.
+        assert!(matches!(run_src("`hi there`"), Object::String(s) if &*s == "hi there"));
+    }
+
+    // Note: interpolated templates (`${...}`) land in stage 1.3 once variable
+    // lookups are supported; the compile-time path for static templates is in
+    // place and matches eval_template's output for the no-interpolation case.
 }

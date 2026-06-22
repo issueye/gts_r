@@ -12,6 +12,7 @@
 //! the corresponding error path; nothing compiles to "do nothing".
 
 use crate::ast::{Expr, Program, Stmt};
+use crate::evaluator::string_lit::{eval_regexp_lit, eval_string_lit};
 use crate::object::{bool_obj, new_error, num_obj, str_obj, Object};
 
 use super::chunk::Chunk;
@@ -60,6 +61,44 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
         Expr::Undefined(u) => {
             let idx = chunk.add_constant(Object::Undefined);
             emit_const(chunk, idx, u.pos.clone());
+            Ok(())
+        }
+        Expr::String(s) => {
+            // String literals are pure (escape processing only, no env), so
+            // evaluate them at compile time and intern the result.
+            let value = eval_string_lit(s);
+            if value.is_runtime_error() {
+                return Err(value);
+            }
+            let idx = chunk.add_constant(value);
+            emit_const(chunk, idx, s.pos.clone());
+            Ok(())
+        }
+        Expr::Regexp(r) => {
+            // Regexp literals compile to a RegexpData value (pure).
+            let value = eval_regexp_lit(r);
+            if value.is_runtime_error() {
+                return Err(value);
+            }
+            let idx = chunk.add_constant(value);
+            emit_const(chunk, idx, r.pos.clone());
+            Ok(())
+        }
+        Expr::Template(t) => {
+            // Templates with `${...}` interpolation need runtime evaluation
+            // (variable lookup), which arrives in stage 1.3. Static templates
+            // (no interpolation) reduce to a plain string at compile time.
+            if t.literal.contains("${") {
+                return Err(unsupported(
+                    t.pos.clone(),
+                    "template interpolation (stage 1.3, after variables)",
+                ));
+            }
+            // Reuse the tree-walker's evaluator for the static case so escape
+            // handling stays identical.
+            let value = crate::evaluator::string_lit::eval_template_static(t);
+            let idx = chunk.add_constant(value);
+            emit_const(chunk, idx, t.pos.clone());
             Ok(())
         }
 

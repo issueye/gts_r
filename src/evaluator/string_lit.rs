@@ -17,6 +17,23 @@ pub fn eval_string_lit(s: &StringLit) -> Object {
     str_obj(unescape_string(inner))
 }
 
+/// Evaluate a template literal that contains no `${...}` interpolation.
+///
+/// This is the compile-time-reducible subset used by the bytecode compiler.
+/// The result is identical to what `eval_template` would produce for the
+/// same literal (same escape handling), just without needing an environment.
+pub fn eval_template_static(t: &TemplateLit) -> Object {
+    let lit = &t.literal;
+    if lit.len() < 2 || !lit.starts_with('`') {
+        return str_obj(lit.clone());
+    }
+    let mut inner = &lit[1..];
+    if inner.ends_with('`') {
+        inner = &inner[..inner.len() - 1];
+    }
+    str_obj(unescape_string(inner))
+}
+
 /// Evaluate a template literal, interpolating `${...}` expressions.
 pub fn eval_template(t: &TemplateLit, env: &EnvRef) -> Object {
     let lit = &t.literal;
