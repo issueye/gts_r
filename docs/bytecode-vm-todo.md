@@ -285,6 +285,8 @@
 
 - [x] 11.1 补齐 fallback-only 语法：`??` nullish coalescing 进入字节码 VM
   - 证据：`src/bytecode/compiler.rs` 将 `??` 降低为 null/undefined 检查短路序列，左值非 nullish 时保留左值，左值为 `null` / `undefined` 时弹出左值并执行右侧；复用 `emit_nullish_jump_checks` 与 `Dup/JumpIfTrue/Jump/Pop` 保持与树遍历一致的“返回操作数值”语义；新增 `bytecode::compiler::tests::compiles_nullish_coalescing_short_circuit`、`bytecode::interp::tests::{nullish_coalescing_returns_right_for_null_or_undefined,nullish_coalescing_keeps_non_nullish_falsy_left}`；新增 parity fixture `tests/fixtures/parity/nullish_coalescing/main.gs`，覆盖 `null ?? 42`、`undefined ?? 7`、`0 ?? 9`、`false ?? true`；验证：`cargo fmt --all --check` passed、`cargo test --lib bytecode::compiler::tests::compiles_nullish_coalescing_short_circuit -- --nocapture` 1 passed、`cargo test --lib bytecode::interp::tests::nullish_coalescing -- --nocapture` 2 passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed
+- [x] 11.2 默认执行后端下沉到 `VirtualMachine::new()`
+  - 证据：`src/object/vm.rs` 将 `VirtualMachine::new()` 的 `exec_mode` 初始值从 `EXEC_MODE_TREEWALK` 改为 `EXEC_MODE_BYTECODE`，注释同步为 tree-walker 是 legacy、bytecode VM 是默认；`Session::new()` / `Session::with_tokio()` 仍显式写入 Bytecode，CLI 仍可通过 `--exec-mode=tree` 覆盖回树遍历；`tests/bytecode_default.rs::virtual_machine_new_defaults_to_bytecode_exec_mode` 直接断言底层 VM 默认 Bytecode，原 `session_new_defaults_to_bytecode_exec_mode` 继续覆盖 Session 默认；验证：`cargo fmt --all --check` passed、`cargo test --test bytecode_default -- --nocapture` 2 passed、`cargo test --test cli_flags cli_exec_mode_tree_keeps_treewalker_fallback -- --nocapture` 1 passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed
 
 ---
 
@@ -295,7 +297,7 @@
 **当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7 Match 全集与类型注解已完成并收口；阶段 8 模块系统全集已完成并收口；阶段 9 异步全集已完成并收口
 **下一条 TODO**：继续阶段 11，继续盘点并补齐 fallback-only 语法/能力，随后规划树遍历下线 PR
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-23（阶段 11.1 已完成：`??` nullish coalescing 已进入字节码 VM，并纳入 parity fixture；后续继续盘点 fallback-only 能力）
+**最后更新**：2026-06-23（阶段 11.2 已完成：默认执行后端已下沉到 `VirtualMachine::new()`；后续继续盘点 fallback-only 能力）
 
 ---
 

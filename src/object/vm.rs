@@ -30,7 +30,7 @@ pub type ImporterFn = dyn Fn(&EnvRef, &str) -> Result<Object, Object>;
 
 pub use super::value::EnvRef;
 
-/// Execution backend selection. 0 = tree-walker (default), 1 = bytecode VM.
+/// Execution backend selection. 0 = legacy tree-walker, 1 = bytecode VM (default).
 /// Stored as `AtomicU8` so the VM can be queried without borrowing.
 pub const EXEC_MODE_TREEWALK: u8 = 0;
 pub const EXEC_MODE_BYTECODE: u8 = 1;
@@ -57,7 +57,7 @@ impl VirtualMachine {
             globals: RefCell::new(HashMap::new()),
             argv: RefCell::new(Vec::new()),
             type_check: AtomicBool::new(false),
-            exec_mode: AtomicU8::new(EXEC_MODE_TREEWALK),
+            exec_mode: AtomicU8::new(EXEC_MODE_BYTECODE),
             next_timer: AtomicI64::new(0),
             async_pending: RefCell::new(0),
             bootstrap_source: RefCell::new(String::new()),
