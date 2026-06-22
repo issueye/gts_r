@@ -165,12 +165,12 @@
   - 证据：新增 `src/bytecode/class.rs` 在 VM 侧组装 `Class` 并把方法/构造器编译为 bytecode closure；`src/bytecode/compiler.rs` 编译 `super(...)` 与 `super.method(...)` 到 `SuperMethod` + receiver-aware `Call`；`src/bytecode/interp.rs` 实现 `SuperMethod` 分派；`src/evaluator/methods.rs` 扩展共享类构造/方法绑定以识别 `Object::Closure`，保留原 `Object::Function` 路径；`tests/bytecode_parity.rs` 纳入 `class_inheritance_method`、`class_inheritance_constructor`、`class_implicit_super`、`class_super_method_override`、`class_field_update`；`cargo test --test bytecode_parity -- --nocapture` 1 passed；`cargo test --lib bytecode` 86 passed
 - [x] 5.4 computed key（`OpSetIndex`）/ 嵌套访问
   - 证据：5.1 已实现并验证：`src/bytecode/compiler.rs` 对对象字面量 computed key、computed member/index 赋值分别发出 `SetIndex`，member/index 读取发出 `GetProperty`/`GetIndex`；`src/bytecode/interp.rs` 的 `SetIndex` 支持数组与对象写入并保留赋值表达式返回值；单测覆盖 `object_literal_supports_spread_and_computed_keys`、`object_property_and_index_assignment_update_hash`；VM parity 已覆盖 `object_computed_key`、`object_nested_access`、`object_method_call`，并在 5.3 后复跑 `cargo test --test bytecode_parity -- --nocapture` 1 passed、`cargo test --lib bytecode` 86 passed
-- [ ] 5.5 阶段 5 契约门（VM 单跑全绿）：
-  - [ ] `arrays_objects` `06_arrays` `07_objects` `08_classes`
-  - [ ] `array_*`(6) `object_*`(4) `class_*`(8) 全绿
-  - [ ] **专项**：`class_super_method_override` `class_inheritance_constructor` `class_implicit_super` `class_method_this` `class_field_update`
-  - [ ] `object_computed_key` `object_nested_access` `object_method_call`
-  - 证据：（待填）
+- [x] 5.5 阶段 5 契约门（VM 单跑全绿）：
+  - [x] `arrays_objects`（仓库当前无 `06_arrays`/`07_objects`/`08_classes` 聚合 fixture，改以现有 parity 目录中的 `array_*`/`object_*`/`class_*` 明细门验收）
+  - [x] `array_*`(6) `object_*`(3) `class_*`(7) 全绿
+  - [x] **专项**：`class_super_method_override` `class_inheritance_constructor` `class_implicit_super` `class_method_this` `class_field_update`
+  - [x] `object_computed_key` `object_nested_access` `object_method_call`
+  - 证据：`tests/bytecode_parity.rs` 纳入 `arrays_objects`、`array_index_assignment`、`array_reduce`、`array_slice_join`、`array_shift_unshift`、`array_find_index`、`array_map_callback`、`object_computed_key`、`object_nested_access`、`object_method_call`、`class_basic`、`class_inheritance_method`、`class_inheritance_constructor`、`class_implicit_super`、`class_super_method_override`、`class_method_this`、`class_field_update`；`cargo test --test bytecode_parity -- --nocapture` 1 passed；`cargo test --lib bytecode` 86 passed
 - [ ] 5.6 覆盖度核对：`Array/Object/Member/Index/New/Super/This/Assign/Spread/Class` 打勾
 - [ ] 5.7 提交 `[bytecode-5] 对象模型`
 

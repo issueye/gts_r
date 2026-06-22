@@ -181,6 +181,22 @@ fn stage_1_3_fixtures() -> Vec<Fixture> {
             expected: "array-index-assignment=1,4,3\n",
         },
         Fixture {
+            dir: "array_reduce",
+            expected: "array-reduce=10\n",
+        },
+        Fixture {
+            dir: "array_slice_join",
+            expected: "array-slice-join=one:two:4\n",
+        },
+        Fixture {
+            dir: "array_shift_unshift",
+            expected: "array-shift-unshift=1:2|3\n",
+        },
+        Fixture {
+            dir: "array_find_index",
+            expected: "array-find-index=8:3\n",
+        },
+        Fixture {
             dir: "object_computed_key",
             expected: "object-computed-key=14:14\n",
         },
