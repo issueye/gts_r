@@ -1874,6 +1874,21 @@ mod tests {
     }
 
     #[test]
+    fn records_async_function_proto() {
+        let chunk = compile_src("async function answer() { return 42; }");
+        assert_eq!(chunk.protos.len(), 1);
+        assert!(chunk.protos[0].is_async);
+    }
+
+    #[test]
+    fn records_async_arrow_proto() {
+        let chunk = compile_src("let answer = async (value) => value;");
+        assert_eq!(chunk.protos.len(), 1);
+        assert!(chunk.protos[0].is_async);
+        assert!(chunk.protos[0].lexical_this);
+    }
+
+    #[test]
     fn compiles_typed_declaration_metadata() {
         let chunk = compile_src("let value: number = 1;");
         let spine = decode_opcode_spine(&chunk);

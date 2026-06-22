@@ -4,7 +4,7 @@
 //! call-frame semantics can grow without making `interp.rs` carry every stage.
 
 use crate::ast::{Position, TypeAnnotation};
-use crate::object::{new_error, EnvRef, Object};
+use crate::object::{new_error, EnvRef, Object, Promise};
 use std::sync::atomic::Ordering;
 
 /// Call a bytecode closure: bind params into a child scope of the closure's
@@ -50,13 +50,6 @@ fn call_closure_impl(
     pos: Position,
 ) -> Result<Object, Object> {
     let proto = &c.proto;
-    if proto.is_async {
-        return Err(new_error(
-            pos,
-            "VMError: async function calls are not supported until stage 9",
-        ));
-    }
-
     let scope = crate::object::Environment::child(&c.home_env);
     if let Some(t) = this {
         scope.borrow_mut().this = Some(t);
@@ -71,6 +64,11 @@ fn call_closure_impl(
         args,
         pos.clone(),
     ) {
+        if proto.is_async {
+            let promise = Promise::new();
+            promise.reject(e);
+            return Ok(Object::Promise(promise));
+        }
         return Err(e);
     }
     bind_upvalues_into_scope(c, &scope);
@@ -78,16 +76,46 @@ fn call_closure_impl(
 
     let chunk = match proto.chunk.borrow().clone() {
         Some(c) => c,
-        None => return Err(new_error(pos, "VMError: function body not compiled")),
+        None => {
+            let error = new_error(pos, "VMError: function body not compiled");
+            if proto.is_async {
+                let promise = Promise::new();
+                promise.reject(error);
+                return Ok(Object::Promise(promise));
+            }
+            return Err(error);
+        }
     };
     let result = super::interp::interpret_with_upvalues(&chunk, &scope, c.upvalues.clone());
     flush_scope_to_upvalues(c, &scope);
     if result.is_runtime_error() {
+        if proto.is_async {
+            let promise = Promise::new();
+            promise.reject(result);
+            return Ok(Object::Promise(promise));
+        }
         Err(result)
     } else if let Some(return_t) = &proto.return_t {
-        check_return_type(&result, return_t, caller_env, pos)?;
+        if let Err(e) = check_return_type(&result, return_t, caller_env, pos) {
+            if proto.is_async {
+                let promise = Promise::new();
+                promise.reject(e);
+                return Ok(Object::Promise(promise));
+            }
+            return Err(e);
+        }
+        if proto.is_async {
+            let promise = Promise::new();
+            promise.resolve(result);
+            return Ok(Object::Promise(promise));
+        }
         Ok(result)
     } else {
+        if proto.is_async {
+            let promise = Promise::new();
+            promise.resolve(result);
+            return Ok(Object::Promise(promise));
+        }
         Ok(result)
     }
 }

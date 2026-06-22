@@ -399,7 +399,11 @@ impl Parser {
             return Some(f);
         }
         if self.cur_is(TokenKind::LParen) {
-            return self.parse_paren_or_arrow();
+            let mut expr = self.parse_paren_or_arrow()?;
+            if let Expr::Arrow(a) = &mut expr {
+                a.is_async = true;
+            }
+            return Some(expr);
         }
         // async ident => ... (single-param arrow)
         if self.cur_is(TokenKind::Ident) {

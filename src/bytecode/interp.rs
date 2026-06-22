@@ -1474,6 +1474,50 @@ mod tests {
     }
 
     #[test]
+    fn async_function_call_returns_resolved_promise() {
+        let result = run_src(
+            r#"
+            async function answer() {
+                return 42;
+            }
+            answer();
+            "#,
+        );
+        let Object::Promise(promise) = result else {
+            panic!("expected async function call to return a promise");
+        };
+        assert_eq!(promise.state(), PromiseState::Fulfilled);
+        assert!(matches!(promise.wait(), Object::Number(n) if n == 42.0));
+    }
+
+    #[test]
+    fn async_arrow_can_be_awaited() {
+        let result = run_src(
+            r#"
+            let answer = async (value) => value + 1;
+            await answer(41);
+            "#,
+        );
+        assert!(matches!(result, Object::Number(n) if n == 42.0));
+    }
+
+    #[test]
+    fn async_method_can_be_awaited() {
+        let result = run_src(
+            r#"
+            class Box {
+                async value() {
+                    return 42;
+                }
+            }
+            let box = new Box();
+            await box.value();
+            "#,
+        );
+        assert!(matches!(result, Object::Number(n) if n == 42.0));
+    }
+
+    #[test]
     fn error_position_matches_treewalker_for_binary_type_error() {
         let (tree, bytecode) = run_src_tree_and_bytecode("1 + true;");
         assert_error_same(tree, bytecode);

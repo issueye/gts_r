@@ -245,8 +245,8 @@
 
 - [x] 9.1 `OpAwait`；`src/bytecode/awaitable.rs` 实现 `BytecodeFrameAwaitable: Awaitable`
   - 证据：`src/bytecode/compiler.rs` 将 `Expr::Await` 编译为表达式求值 + `Opcode::Await`，单测 `bytecode::compiler::tests::compiles_await_opcode` 覆盖；`src/bytecode/interp.rs` 实现 `Opcode::Await`，对非 Promise 原样返回、fulfilled Promise 返回 resolved value、rejected Promise 转 runtime error，单测 `await_non_promise_returns_value`、`await_resolved_promise_returns_value`、`await_rejected_promise_returns_runtime_error` 覆盖；新增 `src/bytecode/awaitable.rs::BytecodeFrameAwaitable` 实现 `Awaitable`，单测 `bytecode_frame_awaitable_polls_chunk_to_ready` 覆盖 poll 到 Ready 与重复 poll 结果；验证：`cargo fmt --all --check` passed、`cargo test --lib bytecode` 112 passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed、`cargo test --test bytecode_modules -- --nocapture` 2 passed
-- [ ] 9.2 async 函数/方法/箭头：`FunctionProto.is_async=true`
-  - 证据：（待填）
+- [x] 9.2 async 函数/方法/箭头：`FunctionProto.is_async=true`
+  - 证据：`src/bytecode/compiler.rs` 已将 async `FuncDecl`/`FuncExpr`/`Arrow` 与类 `Method` 的 `is_async` 写入 `FunctionProto`，新增单测 `records_async_function_proto`、`records_async_arrow_proto` 覆盖函数与箭头元数据；`src/parser/expressions.rs` 修正 `async (value) => ...` 保留 async 标记；`src/bytecode/call.rs` 对 async bytecode closure 返回 fulfilled/rejected `Promise`，参数绑定失败、运行期错误与返回类型错误均转 rejected Promise；`src/bytecode/interp.rs` 新增 `async_function_call_returns_resolved_promise`、`async_arrow_can_be_awaited`、`async_method_can_be_awaited` 覆盖 async 函数/箭头/方法三路；验证：`cargo fmt --all --check` passed、`cargo test --lib bytecode` 117 passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed、`cargo test --test bytecode_modules -- --nocapture` 2 passed
 - [ ] 9.3 接线 `async_runtime/awaitable_bridge.rs` + `object/event_loop.rs`（复用，不改）
   - 证据：（待填）
 - [ ] 9.4 阶段 9 契约门（VM 单跑全绿）：
@@ -282,10 +282,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7 Match 全集与类型注解已完成并收口；阶段 8 模块系统全集已完成并收口；阶段 9.1 `OpAwait` 与 `BytecodeFrameAwaitable` 已完成
-**下一条 TODO**：继续阶段 9，推进 9.2 async 函数/方法/箭头：`FunctionProto.is_async=true`
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口；阶段 7 Match 全集与类型注解已完成并收口；阶段 8 模块系统全集已完成并收口；阶段 9.1 `OpAwait` 与 `BytecodeFrameAwaitable` 已完成；阶段 9.2 async 函数/方法/箭头 Promise 返回已完成
+**下一条 TODO**：继续阶段 9，推进 9.3 接线 `async_runtime/awaitable_bridge.rs` + `object/event_loop.rs`（复用，不改）
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 9.1 已完成：Await 指令、Promise 等待语义与 BytecodeFrameAwaitable 外壳；下一步推进 async 函数返回 Promise）
+**最后更新**：2026-06-22（阶段 9.2 已完成：async 函数/箭头/方法在字节码 VM 中返回 Promise，await 可消费其结果；下一步核对 async runtime/event loop 接线）
 
 ---
 
