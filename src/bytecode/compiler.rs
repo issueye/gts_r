@@ -71,6 +71,7 @@ fn compile_stmt(
         Stmt::Let(s) => compile_decl(
             &s.name,
             s.value.as_ref(),
+            s.type_anno.as_ref(),
             false,
             s.pos.clone(),
             chunk,
@@ -79,6 +80,7 @@ fn compile_stmt(
         Stmt::Var(s) => compile_decl(
             &s.name,
             s.value.as_ref(),
+            s.type_anno.as_ref(),
             false,
             s.pos.clone(),
             chunk,
@@ -87,6 +89,7 @@ fn compile_stmt(
         Stmt::Const(s) => compile_decl(
             &s.name,
             s.value.as_ref(),
+            s.type_anno.as_ref(),
             true,
             s.pos.clone(),
             chunk,
@@ -822,6 +825,7 @@ fn operand_width(op: Opcode) -> u8 {
         | Opcode::New
         | Opcode::Call
         | Opcode::Closure => 2,
+        Opcode::StoreTypedName => 4,
         Opcode::Jump | Opcode::JumpIfFalse | Opcode::JumpIfTrue | Opcode::Loop => 4,
         Opcode::LoadLocal | Opcode::StoreLocal | Opcode::LoadUpvalue | Opcode::StoreUpvalue => 1,
         _ => 0,
@@ -835,6 +839,7 @@ fn operand_width(op: Opcode) -> u8 {
 fn compile_decl(
     name: &str,
     value: Option<&Expr>,
+    type_anno: Option<&crate::ast::TypeAnnotation>,
     is_const: bool,
     pos: crate::ast::Position,
     chunk: &mut Chunk,
@@ -856,8 +861,16 @@ fn compile_decl(
     } else {
         name_idx
     };
-    chunk.write_op(Opcode::StoreName, pos.clone());
-    chunk.write_u16(operand, pos);
+    if let Some(type_anno) = type_anno {
+        let type_idx = chunk.types.len() as u16;
+        chunk.types.push(type_anno.clone());
+        chunk.write_op(Opcode::StoreTypedName, pos.clone());
+        chunk.write_u16(operand, pos.clone());
+        chunk.write_u16(type_idx, pos);
+    } else {
+        chunk.write_op(Opcode::StoreName, pos.clone());
+        chunk.write_u16(operand, pos);
+    }
     Ok(())
 }
 
@@ -1728,6 +1741,15 @@ mod tests {
         let chunk = compile_src("throw \"boom\";");
         let spine = decode_opcode_spine(&chunk);
         assert!(spine.contains(&Opcode::Throw));
+    }
+
+    #[test]
+    fn compiles_typed_declaration_metadata() {
+        let chunk = compile_src("let value: number = 1;");
+        let spine = decode_opcode_spine(&chunk);
+        assert!(spine.contains(&Opcode::StoreTypedName));
+        assert_eq!(chunk.types.len(), 1);
+        assert_eq!(chunk.types[0].to_string(), "number");
     }
 
     #[test]

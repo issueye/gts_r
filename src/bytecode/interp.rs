@@ -9,13 +9,14 @@
 //! the two happy paths and the error are implemented so that the stage-0
 //! contract (`1 + 2` → `3.0`) holds while still rejecting bad types.
 
-use crate::ast::Position;
+use crate::ast::{Position, TypeAnnotation, TypeKind};
 use crate::object::{
     new_error, new_named_error, str_obj, ArrayData, CallContext, EnvRef, HashData, Object,
 };
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::atomic::Ordering;
 
 use super::chunk::Chunk;
 use super::closure::UpvalueSource;
@@ -507,6 +508,56 @@ impl<'a> VmState<'a> {
                     self.env.borrow_mut().set_here(name.to_string(), value);
                 }
             }
+            Opcode::StoreTypedName => {
+                let operand = self.chunk.read_u16(self.ip);
+                self.ip += 2;
+                let type_idx = self.chunk.read_u16(self.ip) as usize;
+                self.ip += 2;
+                let pos = self.chunk.position_at(self.ip - 5);
+                let is_const = operand & 0x8000 != 0;
+                let name_idx = (operand & 0x7fff) as usize;
+                let name = match &self.chunk.constants[name_idx] {
+                    Object::String(s) => s.as_str(),
+                    _ => {
+                        return Err(new_error(
+                            pos,
+                            "VMError: STORE_TYPED_NAME operand is not a string",
+                        ));
+                    }
+                };
+                let Some(type_anno) = self.chunk.types.get(type_idx).cloned() else {
+                    return Err(new_error(
+                        pos,
+                        format!("VMError: missing type annotation {}", type_idx),
+                    ));
+                };
+                let value = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                if self.env.borrow().vm.type_check.load(Ordering::Relaxed)
+                    && !value_matches_type_annotation(&value, &type_anno)
+                {
+                    return Err(new_error(
+                        pos,
+                        format!(
+                            "TypeError: cannot assign {} to '{}: {}'",
+                            value.type_tag(),
+                            name,
+                            type_anno
+                        ),
+                    ));
+                }
+                if is_const {
+                    self.env
+                        .borrow_mut()
+                        .set_typed_const(name.to_string(), value, Some(type_anno));
+                } else {
+                    self.env
+                        .borrow_mut()
+                        .set_typed(name.to_string(), value, Some(type_anno));
+                }
+            }
             Opcode::AssignName => {
                 let name_idx = self.chunk.read_u16(self.ip) as usize;
                 self.ip += 2;
@@ -526,19 +577,24 @@ impl<'a> VmState<'a> {
                     Some(v) => v.clone(),
                     None => return Err(self.stack_underflow(pos.clone())),
                 };
-                let (found, is_const) = self.env.borrow_mut().assign(name, value);
-                if !found {
+                let Some((is_const, type_anno)) = self.binding_info(name) else {
                     return Err(new_error(
                         pos,
                         format!("ReferenceError: '{}' is not defined", name),
                     ));
-                }
+                };
                 if is_const {
                     return Err(new_error(
                         pos,
                         format!("TypeError: assignment to constant '{}'", name),
                     ));
                 }
+                if let Some(type_anno) = type_anno {
+                    self.check_type_annotation(name, &value, &type_anno, pos)?;
+                }
+                let (found, is_const) = self.env.borrow_mut().assign(name, value);
+                debug_assert!(found);
+                debug_assert!(!is_const);
             }
             Opcode::LoadThis => {
                 let value = self.env.borrow().this.clone().unwrap_or(Object::Undefined);
@@ -645,6 +701,41 @@ impl<'a> VmState<'a> {
         }
         self.stack.push(result);
         Ok(())
+    }
+
+    fn check_type_annotation(
+        &self,
+        name: &str,
+        value: &Object,
+        type_anno: &TypeAnnotation,
+        pos: Position,
+    ) -> Result<(), Object> {
+        if !self.env.borrow().vm.type_check.load(Ordering::Relaxed)
+            || value_matches_type_annotation(value, type_anno)
+        {
+            return Ok(());
+        }
+        Err(new_error(
+            pos,
+            format!(
+                "TypeError: cannot assign {} to '{}: {}'",
+                value.type_tag(),
+                name,
+                type_anno
+            ),
+        ))
+    }
+
+    fn binding_info(&self, name: &str) -> Option<(bool, Option<TypeAnnotation>)> {
+        let mut scope = Some(self.env.clone());
+        while let Some(env) = scope {
+            let borrowed = env.borrow();
+            if let Some(binding) = borrowed.bindings.get(name) {
+                return Some((binding.is_const, binding.type_anno.clone()));
+            }
+            scope = borrowed.parent.clone();
+        }
+        None
     }
 
     /// Pop one operand, apply a unary op, push the result.
@@ -991,6 +1082,66 @@ fn assign_index(
     }
 }
 
+pub(crate) fn value_matches_type_annotation(value: &Object, anno: &TypeAnnotation) -> bool {
+    if anno.optional && matches!(value, Object::Null | Object::Undefined) {
+        return true;
+    }
+    match anno.kind {
+        TypeKind::Union => anno
+            .union
+            .iter()
+            .any(|member| value_matches_type_annotation(value, member)),
+        TypeKind::Array => match value {
+            Object::Array(items) => {
+                let Some(inner) = &anno.array_of else {
+                    return true;
+                };
+                items
+                    .borrow()
+                    .elements
+                    .iter()
+                    .all(|item| value_matches_type_annotation(item, inner))
+            }
+            _ => false,
+        },
+        TypeKind::Object => is_object_like(value),
+        TypeKind::Function => is_function_like(value),
+        TypeKind::Primitive => match anno.name.as_str() {
+            "any" | "unknown" => true,
+            "number" => matches!(value, Object::Number(_)),
+            "string" => matches!(value, Object::String(_)),
+            "boolean" | "bool" => matches!(value, Object::Boolean(_)),
+            "null" => matches!(value, Object::Null),
+            "undefined" | "void" => matches!(value, Object::Undefined),
+            "object" => is_object_like(value),
+            "function" => is_function_like(value),
+            _ => true,
+        },
+    }
+}
+
+fn is_object_like(value: &Object) -> bool {
+    matches!(
+        value,
+        Object::Hash(_)
+            | Object::Array(_)
+            | Object::Instance(_)
+            | Object::Map(_)
+            | Object::Set(_)
+            | Object::Date(_)
+            | Object::Regexp(_)
+            | Object::Error(_)
+            | Object::Null
+    )
+}
+
+fn is_function_like(value: &Object) -> bool {
+    matches!(
+        value,
+        Object::Function(_) | Object::Builtin(_) | Object::Class(_) | Object::Closure(_)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -999,6 +1150,7 @@ mod tests {
     use crate::object::Environment;
     use crate::object::VirtualMachine;
     use crate::parser::Parser;
+    use std::sync::atomic::Ordering;
 
     fn run_src(src: &str) -> Object {
         let lexer = Lexer::new(src);
@@ -1011,6 +1163,34 @@ mod tests {
         );
         let chunk = compile(&program).expect("compile");
         let vm = VirtualMachine::new();
+        let env = Environment::new_root(vm);
+        interpret(&chunk, &env)
+    }
+
+    fn compile_src(src: &str) -> Chunk {
+        let lexer = Lexer::new(src);
+        let mut parser = Parser::new(lexer, "t.gs");
+        let program = parser.parse_program();
+        assert!(
+            program.errors.is_empty(),
+            "parse errors: {:?}",
+            program.errors
+        );
+        compile(&program).expect("compile")
+    }
+
+    fn run_src_with_env(src: &str) -> (Object, EnvRef) {
+        let chunk = compile_src(src);
+        let vm = VirtualMachine::new();
+        let env = Environment::new_root(vm);
+        let result = interpret(&chunk, &env);
+        (result, env)
+    }
+
+    fn run_src_with_type_check(src: &str) -> Object {
+        let chunk = compile_src(src);
+        let vm = VirtualMachine::new();
+        vm.type_check.store(true, Ordering::Relaxed);
         let env = Environment::new_root(vm);
         interpret(&chunk, &env)
     }
@@ -1413,6 +1593,68 @@ mod tests {
         // `let x = 10; x` — last expression is the result
         assert!(matches!(run_src("let x = 10\nx"), Object::Number(n) if n == 10.0));
     }
+
+    #[test]
+    fn typed_declaration_preserves_annotation_without_default_checking() {
+        let (result, env) = run_src_with_env("let value: number = \"not-number\"\nvalue");
+
+        assert!(matches!(result, Object::String(s) if s.as_ref() == "not-number"));
+        let env = env.borrow();
+        let binding = env.bindings.get("value").expect("typed binding");
+        assert!(matches!(&binding.value, Object::String(s) if s.as_ref() == "not-number"));
+        assert_eq!(
+            binding
+                .type_anno
+                .as_ref()
+                .expect("type annotation")
+                .to_string(),
+            "number"
+        );
+    }
+
+    #[test]
+    fn type_check_rejects_mismatched_typed_declaration() {
+        let result = run_src_with_type_check("let value: number = \"not-number\"\nvalue");
+        let Object::Error(data) = result else {
+            panic!("expected type error");
+        };
+        let data = data.borrow();
+        assert_eq!(data.name, "TypeError");
+        assert_eq!(data.message, "cannot assign string to 'value: number'");
+    }
+
+    #[test]
+    fn type_check_rejects_mismatched_assignment_to_typed_binding() {
+        let result = run_src_with_type_check("let value: number = 1\nvalue = \"two\"");
+        let Object::Error(data) = result else {
+            panic!("expected type error");
+        };
+        let data = data.borrow();
+        assert_eq!(data.name, "TypeError");
+        assert_eq!(data.message, "cannot assign string to 'value: number'");
+    }
+
+    #[test]
+    fn type_check_rejects_mismatched_function_return() {
+        let result = run_src_with_type_check(
+            r#"
+            function value(): number {
+                return "not-number";
+            }
+            value();
+            "#,
+        );
+        let Object::Error(data) = result else {
+            panic!("expected type error");
+        };
+        let data = data.borrow();
+        assert_eq!(data.name, "TypeError");
+        assert_eq!(
+            data.message,
+            "cannot return string from function returning number"
+        );
+    }
+
     #[test]
     fn const_decl_and_read() {
         assert!(matches!(run_src("const y = 5\ny * 2"), Object::Number(n) if n == 10.0));

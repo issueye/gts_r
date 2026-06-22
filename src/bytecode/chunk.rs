@@ -7,7 +7,7 @@
 //! per opcode (see `Opcode`). Position tracking is line-anchored via
 //! `line_offsets` to keep memory low; `position_at(ip)` does the lookup.
 
-use crate::ast::{ClassDecl, Position};
+use crate::ast::{ClassDecl, Position, TypeAnnotation};
 use crate::object::Object;
 use std::rc::Rc;
 
@@ -44,6 +44,8 @@ pub struct Chunk {
     /// to the shared evaluator class builder before method bodies are lowered
     /// into bytecode prototypes.
     pub classes: Vec<Rc<ClassDecl>>,
+    /// Type annotations referenced by typed declaration opcodes.
+    pub types: Vec<TypeAnnotation>,
     /// Source position of the instruction that starts at each byte offset.
     /// Indexed by code offset; kept 1:1 with `code` for O(1) lookup. Memory is
     /// acceptable for stage 0; stage 8 may switch to run-length encoding.
@@ -160,6 +162,13 @@ impl Chunk {
                             let v = self.read_u16(ip);
                             ip += 2;
                             format!(" {}", v)
+                        }
+                        Opcode::StoreTypedName => {
+                            let name = self.read_u16(ip);
+                            ip += 2;
+                            let type_idx = self.read_u16(ip);
+                            ip += 2;
+                            format!(" {} {}", name, type_idx)
                         }
                         Opcode::LoadLocal
                         | Opcode::StoreLocal

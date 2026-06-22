@@ -68,6 +68,9 @@ pub enum Opcode {
     AssignName = 48,
     /// Push the current `this` binding.
     LoadThis = 49,
+    /// Store a declared binding with a type annotation. Operands: u16 name
+    /// index (high bit = const), u16 type-annotation index in `Chunk::types`.
+    StoreTypedName = 55,
 
     // —— control flow ——
     /// Operand: u32 absolute ip.
@@ -161,6 +164,7 @@ impl Opcode {
             47 => Opcode::StoreName,
             48 => Opcode::AssignName,
             49 => Opcode::LoadThis,
+            55 => Opcode::StoreTypedName,
             50 => Opcode::Jump,
             51 => Opcode::JumpIfFalse,
             52 => Opcode::JumpIfTrue,
@@ -226,6 +230,7 @@ impl Opcode {
             Opcode::StoreName => "STORE_NAME",
             Opcode::AssignName => "ASSIGN_NAME",
             Opcode::LoadThis => "LOAD_THIS",
+            Opcode::StoreTypedName => "STORE_TYPED_NAME",
             Opcode::Jump => "JUMP",
             Opcode::JumpIfFalse => "JUMP_IF_FALSE",
             Opcode::JumpIfTrue => "JUMP_IF_TRUE",

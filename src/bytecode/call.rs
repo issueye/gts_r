@@ -3,8 +3,9 @@
 //! The interpreter dispatches `CALL`, but closure invocation lives here so
 //! call-frame semantics can grow without making `interp.rs` carry every stage.
 
-use crate::ast::Position;
+use crate::ast::{Position, TypeAnnotation};
 use crate::object::{new_error, EnvRef, Object};
+use std::sync::atomic::Ordering;
 
 /// Call a bytecode closure: bind params into a child scope of the closure's
 /// home environment, then run the body chunk.
@@ -83,9 +84,33 @@ fn call_closure_impl(
     flush_scope_to_upvalues(c, &scope);
     if result.is_runtime_error() {
         Err(result)
+    } else if let Some(return_t) = &proto.return_t {
+        check_return_type(&result, return_t, caller_env, pos)?;
+        Ok(result)
     } else {
         Ok(result)
     }
+}
+
+fn check_return_type(
+    value: &Object,
+    return_t: &TypeAnnotation,
+    caller_env: &EnvRef,
+    pos: Position,
+) -> Result<(), Object> {
+    if !caller_env.borrow().vm.type_check.load(Ordering::Relaxed)
+        || super::interp::value_matches_type_annotation(value, return_t)
+    {
+        return Ok(());
+    }
+    Err(new_error(
+        pos,
+        format!(
+            "TypeError: cannot return {} from function returning {}",
+            value.type_tag(),
+            return_t
+        ),
+    ))
 }
 
 fn bind_upvalues_into_scope(c: &crate::bytecode::closure::ClosureData, scope: &EnvRef) {
