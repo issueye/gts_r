@@ -194,7 +194,8 @@
   - 证据：`tests/bytecode_parity.rs` 纳入 `try_catch`、`try_finally_no_throw`、`throw_catch_string`、`throw_catch_error`、`catch_finally_order` 并逐字节通过；`cargo test --test bytecode_parity -- --nocapture` 1 passed；`cargo test --lib bytecode` 93 passed；`match_no_arm_catch` 未纳入本门是明确阶段依赖，阶段 7.6 已列入 Match 门
 - [x] 6.5 错误位置：`Chunk.lines` 反查，message 与树遍历**逐字符一致**
   - 证据：`src/bytecode/interp.rs` 新增 `run_src_tree_and_bytecode` 与 `assert_error_same`，同一 AST 分别走树遍历与字节码 VM 后逐字段比较 `ErrorData.name/message/stack/pos`；新增单测 `bytecode::interp::tests::error_position_matches_treewalker_for_binary_type_error`（`1 + true;`）与 `bytecode::interp::tests::throw_position_matches_treewalker_for_non_error_value`（`throw "boom";`）；`cargo test --lib bytecode` 95 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
-- [ ] 6.6 提交 `[bytecode-6] 错误处理`
+- [x] 6.6 提交 `[bytecode-6] 错误处理`
+  - 证据：阶段 6 已拆分提交：`f3a9148 feat(bytecode): add throw opcode and protected regions`（6.1）、`556e0c6 feat(bytecode): unwind throws to catch handlers`（6.2）、`d2060b1 feat(bytecode): run finally during throw unwinds`（6.3）、`03625d4 test(bytecode): validate error handling parity`（6.4）、`f6a77d7 test(bytecode): verify error position parity`（6.5）；错误处理阶段收口完成
 
 ---
 
@@ -277,10 +278,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6.1-6.5 `OpThrow`、`Chunk.protected_regions`、catch unwind、finally 语义、错误处理 parity 门与错误位置/消息逐字段对齐已完成
-**下一条 TODO**：继续阶段 6，推进 6.6 提交 `[bytecode-6] 错误处理`
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5 对象模型全集已完成并收口；阶段 6 错误处理全集已完成并收口
+**下一条 TODO**：继续阶段 7，推进 7.1 Match 编译：scrutinee 求值 + 逐 arm 模式测试 + 命中跳转 + body + guard
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 6.5 已完成：新增树遍历 vs 字节码 VM 错误对象逐字段对齐测试，覆盖二元类型错误与非 Error 抛值包装；验证 `cargo test --lib bytecode` 95 passed、`cargo test --test bytecode_parity -- --nocapture` 1 passed；下一步收尾阶段 6）
+**最后更新**：2026-06-22（阶段 6.6 已完成：阶段 6 错误处理以 5 个提交收口；下一步进入阶段 7 Match 与类型注解）
 
 ---
 
