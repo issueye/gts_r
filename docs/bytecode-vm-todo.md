@@ -163,8 +163,8 @@
   - 证据：`src/bytecode/compiler.rs` 覆盖 `Stmt::ClassDecl`/`Expr::Class` → `NewClass`，`Expr::New` → `New`，并用 `Call` 高位标记 member/index callee 的 receiver；`src/bytecode/chunk.rs` 保存 class decl 表，`src/bytecode/interp.rs` 执行 `NewClass` 时复用 `build_class`，执行 `LoadThis` 并把 receiver 透传到 builtin/bytecode closure/tree-walker function 调用；`src/bytecode/call.rs` 支持 bytecode closure 的显式 `this`；`DefineMethod` opcode 保持预留，方法体下沉到 VM 原型编译留给 5.3；`tests/bytecode_parity.rs` 纳入 `object_method_call`、`class_basic`、`class_method_this`；`cargo test --lib bytecode` 86 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
 - [x] 5.3 super 方法解析（复用 `methods.rs` 逻辑）；`build_class` 下沉到编译器
   - 证据：新增 `src/bytecode/class.rs` 在 VM 侧组装 `Class` 并把方法/构造器编译为 bytecode closure；`src/bytecode/compiler.rs` 编译 `super(...)` 与 `super.method(...)` 到 `SuperMethod` + receiver-aware `Call`；`src/bytecode/interp.rs` 实现 `SuperMethod` 分派；`src/evaluator/methods.rs` 扩展共享类构造/方法绑定以识别 `Object::Closure`，保留原 `Object::Function` 路径；`tests/bytecode_parity.rs` 纳入 `class_inheritance_method`、`class_inheritance_constructor`、`class_implicit_super`、`class_super_method_override`、`class_field_update`；`cargo test --test bytecode_parity -- --nocapture` 1 passed；`cargo test --lib bytecode` 86 passed
-- [ ] 5.4 computed key（`OpSetIndex`）/ 嵌套访问
-  - 证据：（待填）
+- [x] 5.4 computed key（`OpSetIndex`）/ 嵌套访问
+  - 证据：5.1 已实现并验证：`src/bytecode/compiler.rs` 对对象字面量 computed key、computed member/index 赋值分别发出 `SetIndex`，member/index 读取发出 `GetProperty`/`GetIndex`；`src/bytecode/interp.rs` 的 `SetIndex` 支持数组与对象写入并保留赋值表达式返回值；单测覆盖 `object_literal_supports_spread_and_computed_keys`、`object_property_and_index_assignment_update_hash`；VM parity 已覆盖 `object_computed_key`、`object_nested_access`、`object_method_call`，并在 5.3 后复跑 `cargo test --test bytecode_parity -- --nocapture` 1 passed、`cargo test --lib bytecode` 86 passed
 - [ ] 5.5 阶段 5 契约门（VM 单跑全绿）：
   - [ ] `arrays_objects` `06_arrays` `07_objects` `08_classes`
   - [ ] `array_*`(6) `object_*`(4) `class_*`(8) 全绿
