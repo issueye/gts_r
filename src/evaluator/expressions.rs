@@ -842,7 +842,18 @@ pub fn bind_params(
         let _ = (caller, &pos);
         scope.borrow_mut().set_here(p.name.clone(), value);
     }
+    bind_arguments_object(scope, args);
     Ok(())
+}
+
+fn bind_arguments_object(scope: &EnvRef, args: &[Object]) {
+    let already_bound = scope.borrow().bindings.contains_key("arguments");
+    if already_bound {
+        return;
+    }
+    let elements = args.to_vec();
+    let arguments = Object::Array(Rc::new(RefCell::new(ArrayData { elements })));
+    scope.borrow_mut().set_here("arguments", arguments);
 }
 
 fn eval_member(m: &MemberExpr, env: &EnvRef) -> Object {

@@ -118,16 +118,18 @@
   - 证据：`Opcode::Closure/Call/Return/ReturnNull` 均有解释器执行分支；`src/bytecode/interp.rs` 的 `Call` 按 `[..., callee, arg1, ..., argN]` 拆栈并调用；函数声明/表达式/箭头函数/递归函数单测通过；`bytecode::interp::tests::return_null_opcode_returns_null` 覆盖 `ReturnNull`
 - [x] 3.5 **关键桥接**：`evaluator/expressions.rs:745 apply_function` + `methods.rs` 同名点新增 `Object::Closure` 臂，委托 `bytecode::interp::call_closure`
   - 证据：按功能拆分为 `src/bytecode/call.rs`；`apply_function` 的 `Object::Closure` 分支委托 `bytecode::call::call_closure_object`；新增 `array_map_callback` fixture 覆盖 `[1,2,3].map((value)=>value*2)` native→VM 闭包回调，`cargo test --test bytecode_parity -- --nocapture` ok
-- [~] 3.6 参数默认值 / spread / `arguments` 对象（对齐现有 `bind_params`）
-  - 证据：VM 闭包调用复用 `evaluator::expressions::bind_params`；`function_params` fixture 覆盖默认参数（缺席实参触发默认值，显式 `undefined` 保持 undefined），树遍历与 VM 输出均为 `function-params=item:undefined:key`；新增 `function_rest_params` fixture 覆盖 rest 参数，树遍历与 VM 输出均为 `function-rest-params=v:1|2|3:3`；调用位置 spread 实参与 `arguments` 对象仍需后续补齐
-- [~] 3.7 阶段 3 契约门（VM 单跑全绿）：
+- [x] 3.6 参数默认值 / spread / `arguments` 对象（对齐现有 `bind_params`）
+  - 证据：VM 闭包调用复用 `evaluator::expressions::bind_params`；`function_params` fixture 覆盖默认参数（缺席实参触发默认值，显式 `undefined` 保持 undefined），树遍历与 VM 输出均为 `function-params=item:undefined:key`；`function_rest_params` fixture 覆盖 rest 参数，树遍历与 VM 输出均为 `function-rest-params=v:1|2|3:3`；新增 `function_arguments` fixture 覆盖 `arguments` 对象，树遍历与 VM 输出均为 `function-arguments=3:a:c:a`；新增 `function_spread_call` fixture 覆盖调用位置 spread 实参，树遍历与 VM 输出均为 `function-spread-call=a:b:c`
+- [x] 3.7 阶段 3 契约门（VM 单跑全绿）：
   - [x] `function_call` `recursive_function`
-  - [x] `function_params` `function_rest_params`
+  - [x] `function_params` `function_rest_params` `function_arguments` `function_spread_call`
   - [x] `string_methods`（native 方法回调）
   - [x] **native↔VM 互调专项**：`array_map_callback` 即 `[1,2,3].map((value)=>value*2)` 在 VM 下绿
-  - 证据：`tests/bytecode_parity.rs::bytecode_vm_matches_stage_1_3_fixtures` 当前覆盖 `function_call`、`recursive_function`、`function_params`、`function_rest_params`、`string_methods`、`array_map_callback` 并通过；`cargo test --lib bytecode` 71 passed；剩余调用位置 spread 实参/`arguments` 对象/本地 upvalue 后才能收口阶段 3
-- [ ] 3.8 覆盖度核对：`Func/Arrow/Call/FuncDecl` 打勾
-- [ ] 3.9 提交 `[bytecode-3] 函数与 native 互调`
+  - 证据：`tests/bytecode_parity.rs::bytecode_vm_matches_stage_1_3_fixtures` 当前覆盖 `function_call`、`recursive_function`、`function_params`、`function_rest_params`、`function_arguments`、`function_spread_call`、`string_methods`、`array_map_callback` 并通过；`cargo test --lib bytecode` 71 passed；本地闭包捕获归阶段 4 `function_closure`
+- [x] 3.8 覆盖度核对：`Func/Arrow/Call/FuncDecl` 打勾
+  - 证据：`src/bytecode/compiler.rs` 覆盖 `Stmt::FuncDecl`、`Expr::Func`、`Expr::Arrow`、`Expr::Call`；`Expr::Call` 同时覆盖固定参数 `Call` 与 spread 实参 `CallSpread`；`bytecode::interp` 函数声明/匿名函数/箭头函数/递归函数单测通过；parity fixtures 覆盖函数调用、默认参数、rest、`arguments`、spread call、native 回调
+- [x] 3.9 提交 `[bytecode-3] 函数与 native 互调`
+  - 证据：提交 `51cadf8 feat(bytecode): complete stage 3 call parameters`，包含 `arguments` 对象、调用位置 spread 实参、阶段 3 fixture 与 TODO 收口
 
 ---
 
@@ -271,10 +273,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已完成到 2.7；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构与 ReturnNull 执行分支；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`
-**下一条 TODO**：继续 3.6，补调用位置 spread 实参与 `arguments` 对象，再进入本地 upvalue/闭包收口
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`
+**下一条 TODO**：进入阶段 4，从 4.1 `Upvalue` 两态模型开始
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（3.1/3.2/3.4 结构证据：`cargo test --lib bytecode` 71 passed；3.6 rest fixture：`function-rest-params=v:1|2|3:3`；2.7 分配证据仍为 tree_walk=1,000,003 allocs，bytecode_vm=15 allocs，ratio=66,666.9x）
+**最后更新**：2026-06-22（阶段 3 参数/调用证据：`function-arguments=3:a:c:a`、`function-spread-call=a:b:c`；`cargo test --lib bytecode` 71 passed；`cargo test --test bytecode_parity -- --nocapture` passed；2.7 分配证据仍为 tree_walk=1,000,003 allocs，bytecode_vm=15 allocs，ratio=66,666.9x）
 
 ---
 

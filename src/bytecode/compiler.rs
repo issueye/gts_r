@@ -832,6 +832,24 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
         // —— function call (callee + args, then CALL) ——
         Expr::Call(c) => {
             compile_expr(&c.callee, chunk)?;
+            if c.args.iter().any(|arg| matches!(arg, Expr::Spread(_))) {
+                chunk.write_op(Opcode::NewArray, c.pos.clone());
+                chunk.write_u16(0, c.pos.clone());
+                for arg in &c.args {
+                    match arg {
+                        Expr::Spread(sp) => {
+                            compile_expr(&sp.value, chunk)?;
+                            chunk.write_op(Opcode::Spread, sp.pos.clone());
+                        }
+                        _ => {
+                            compile_expr(arg, chunk)?;
+                            chunk.write_op(Opcode::PushArg, arg.pos());
+                        }
+                    }
+                }
+                chunk.write_op(Opcode::CallSpread, c.pos.clone());
+                return Ok(());
+            }
             for arg in &c.args {
                 compile_expr(arg, chunk)?;
             }

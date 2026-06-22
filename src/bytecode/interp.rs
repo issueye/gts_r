@@ -188,6 +188,47 @@ impl<'a> VmState<'a> {
                 let result = self.call_value(callee, args, pos.clone())?;
                 self.stack.push(result);
             }
+            Opcode::PushArg => {
+                let pos = self.chunk.position_at(self.ip - 1);
+                let value = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                self.push_packed_arg(value, false, pos)?;
+            }
+            Opcode::Spread => {
+                let pos = self.chunk.position_at(self.ip - 1);
+                let value = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                self.push_packed_arg(value, true, pos)?;
+            }
+            Opcode::CallSpread => {
+                let pos = self.chunk.position_at(self.ip - 1);
+                let args_obj = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                let callee = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                let args = match args_obj {
+                    Object::Array(a) => a.borrow().elements.clone(),
+                    other => {
+                        return Err(new_error(
+                            pos,
+                            format!(
+                                "VMError: CALL_SPREAD expected args array, got {}",
+                                other.type_tag()
+                            ),
+                        ));
+                    }
+                };
+                let result = self.call_value(callee, args, pos.clone())?;
+                self.stack.push(result);
+            }
             Opcode::New => {
                 let arg_count = self.chunk.read_u16(self.ip) as usize;
                 self.ip += 2;
@@ -472,6 +513,40 @@ impl<'a> VmState<'a> {
                 format!("VMError: {} operand is not a string", opcode),
             )),
         }
+    }
+
+    fn push_packed_arg(
+        &mut self,
+        value: Object,
+        spread: bool,
+        pos: Position,
+    ) -> Result<(), Object> {
+        let args_obj = self
+            .stack
+            .last()
+            .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+        let Object::Array(args_array) = args_obj else {
+            return Err(new_error(
+                pos,
+                format!(
+                    "VMError: packed call args target is {}",
+                    args_obj.type_tag()
+                ),
+            ));
+        };
+
+        let mut args = args_array.borrow_mut();
+        if spread {
+            if let Object::Array(items) = value {
+                args.elements
+                    .extend(items.borrow().elements.iter().cloned());
+            } else {
+                args.elements.push(value);
+            }
+        } else {
+            args.elements.push(value);
+        }
+        Ok(())
     }
 
     /// Invoke a callable value with the given arguments. Stage 3 supports

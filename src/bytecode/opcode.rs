@@ -86,6 +86,10 @@ pub enum Opcode {
     Call = 61,
     Return = 62,
     ReturnNull = 63,
+    /// Append a single evaluated value to the packed call-args array.
+    PushArg = 64,
+    /// Call with arguments packed in a runtime array. Used for spread args.
+    CallSpread = 65,
 
     // —— object model ——
     NewObject = 70,
@@ -164,6 +168,8 @@ impl Opcode {
             61 => Opcode::Call,
             62 => Opcode::Return,
             63 => Opcode::ReturnNull,
+            64 => Opcode::PushArg,
+            65 => Opcode::CallSpread,
             70 => Opcode::NewObject,
             71 => Opcode::NewArray,
             72 => Opcode::GetProperty,
@@ -226,6 +232,8 @@ impl Opcode {
             Opcode::Call => "CALL",
             Opcode::Return => "RETURN",
             Opcode::ReturnNull => "RETURN_NULL",
+            Opcode::PushArg => "PUSH_ARG",
+            Opcode::CallSpread => "CALL_SPREAD",
             Opcode::NewObject => "NEW_OBJECT",
             Opcode::NewArray => "NEW_ARRAY",
             Opcode::GetProperty => "GET_PROPERTY",

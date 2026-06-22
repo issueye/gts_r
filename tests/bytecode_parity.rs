@@ -141,6 +141,14 @@ fn stage_1_3_fixtures() -> Vec<Fixture> {
             expected: "function-rest-params=v:1|2|3:3\n",
         },
         Fixture {
+            dir: "function_arguments",
+            expected: "function-arguments=3:a:c:a\n",
+        },
+        Fixture {
+            dir: "function_spread_call",
+            expected: "function-spread-call=a:b:c\n",
+        },
+        Fixture {
             dir: "string_methods",
             expected: "string-methods=ALPHA:4\n",
         },
