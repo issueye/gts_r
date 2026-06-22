@@ -792,10 +792,27 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk, resolutions: &ResolutionMap) -> 
             compile_template_interpolated(t, chunk, resolutions)
         }
         Expr::Array(a) => {
-            for element in &a.elements {
-                if matches!(element, Expr::Spread(_)) {
-                    return Err(unsupported(element.pos(), "array spread literal element"));
+            if a.elements
+                .iter()
+                .any(|element| matches!(element, Expr::Spread(_)))
+            {
+                chunk.write_op(Opcode::NewArray, a.pos.clone());
+                chunk.write_u16(0, a.pos.clone());
+                for element in &a.elements {
+                    match element {
+                        Expr::Spread(sp) => {
+                            compile_expr(&sp.value, chunk, resolutions)?;
+                            chunk.write_op(Opcode::Spread, sp.pos.clone());
+                        }
+                        _ => {
+                            compile_expr(element, chunk, resolutions)?;
+                            chunk.write_op(Opcode::PushArg, element.pos());
+                        }
+                    }
                 }
+                return Ok(());
+            }
+            for element in &a.elements {
                 compile_expr(element, chunk, resolutions)?;
             }
             chunk.write_op(Opcode::NewArray, a.pos.clone());
@@ -805,17 +822,27 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk, resolutions: &ResolutionMap) -> 
         Expr::Object(o) => {
             chunk.write_op(Opcode::NewObject, o.pos.clone());
             for prop in &o.properties {
-                if prop.spread || prop.computed || prop.is_accessor {
-                    return Err(unsupported(
-                        prop.pos.clone(),
-                        "object spread/computed/accessor property",
-                    ));
+                if prop.is_accessor {
+                    return Err(unsupported(prop.pos.clone(), "object accessor property"));
                 }
-                compile_expr(&prop.value, chunk, resolutions)?;
-                let key = object_property_key(prop)?;
-                let key_idx = chunk.add_constant(str_obj(key));
-                chunk.write_op(Opcode::SetProperty, prop.pos.clone());
-                chunk.write_u16(key_idx, prop.pos.clone());
+                if prop.spread {
+                    compile_expr(&prop.value, chunk, resolutions)?;
+                    chunk.write_op(Opcode::Spread, prop.pos.clone());
+                    continue;
+                }
+                chunk.write_op(Opcode::Dup, prop.pos.clone());
+                if prop.computed {
+                    compile_expr(&prop.key, chunk, resolutions)?;
+                    compile_expr(&prop.value, chunk, resolutions)?;
+                    chunk.write_op(Opcode::SetIndex, prop.pos.clone());
+                } else {
+                    compile_expr(&prop.value, chunk, resolutions)?;
+                    let key = object_property_key(prop)?;
+                    let key_idx = chunk.add_constant(str_obj(key));
+                    chunk.write_op(Opcode::SetProperty, prop.pos.clone());
+                    chunk.write_u16(key_idx, prop.pos.clone());
+                }
+                chunk.write_op(Opcode::Pop, prop.pos.clone());
             }
             Ok(())
         }
@@ -1038,35 +1065,40 @@ fn object_property_key_expr(expr: &Expr) -> String {
 
 /// Compile an assignment expression.
 ///
-/// Stage 1 supports `name = expr` and compound `name <op>= expr` for an
-/// identifier target. Member/index assignment is stage 5.
+/// Stage 5 extends identifier assignment with member/index targets.
 fn compile_assign(
     a: &crate::ast::AssignExpr,
     chunk: &mut Chunk,
     resolutions: &ResolutionMap,
 ) -> Result<(), Object> {
-    let name = match &a.left {
-        Expr::Ident(i) => i.name.clone(),
-        _ => {
-            return Err(unsupported(
-                a.pos.clone(),
-                "assignment to non-identifier target",
-            ));
-        }
-    };
+    match &a.left {
+        Expr::Ident(i) => return compile_name_assign(a, &i.name, chunk, resolutions),
+        Expr::Member(m) => return compile_member_assign(a, m, chunk, resolutions),
+        Expr::Index(i) => return compile_index_assign(a, i, chunk, resolutions),
+        _ => {}
+    }
+    Err(unsupported(a.pos.clone(), "assignment target"))
+}
+
+fn compile_name_assign(
+    a: &crate::ast::AssignExpr,
+    name: &str,
+    chunk: &mut Chunk,
+    resolutions: &ResolutionMap,
+) -> Result<(), Object> {
     if a.op == "=" {
         compile_expr(&a.right, chunk, resolutions)?;
         // DUP so the assigned value is both stored and left on the stack as
         // the expression result (assignment evaluates to the value).
         chunk.write_op(Opcode::Dup, a.pos.clone());
-        let name_idx = chunk.add_constant(str_obj(name));
+        let name_idx = chunk.add_constant(str_obj(name.to_string()));
         chunk.write_op(Opcode::AssignName, a.pos.clone());
         chunk.write_u16(name_idx, a.pos.clone());
         Ok(())
     } else {
         // Compound: read current, combine with right, store.
         // LOAD_NAME name ; <right> ; <op> ; DUP ; ASSIGN_NAME name
-        let name_idx_load = chunk.add_constant(str_obj(name.clone()));
+        let name_idx_load = chunk.add_constant(str_obj(name.to_string()));
         chunk.write_op(Opcode::LoadName, a.pos.clone());
         chunk.write_u16(name_idx_load, a.pos.clone());
         compile_expr(&a.right, chunk, resolutions)?;
@@ -1077,11 +1109,62 @@ fn compile_assign(
         })?;
         chunk.write_op(op, a.pos.clone());
         chunk.write_op(Opcode::Dup, a.pos.clone());
-        let name_idx_store = chunk.add_constant(str_obj(name));
+        let name_idx_store = chunk.add_constant(str_obj(name.to_string()));
         chunk.write_op(Opcode::AssignName, a.pos.clone());
         chunk.write_u16(name_idx_store, a.pos.clone());
         Ok(())
     }
+}
+
+fn compile_member_assign(
+    a: &crate::ast::AssignExpr,
+    m: &crate::ast::MemberExpr,
+    chunk: &mut Chunk,
+    resolutions: &ResolutionMap,
+) -> Result<(), Object> {
+    compile_expr(&m.object, chunk, resolutions)?;
+    if m.computed {
+        compile_expr(&m.property, chunk, resolutions)?;
+        compile_assign_rhs(a, chunk, resolutions)?;
+        chunk.write_op(Opcode::SetIndex, a.pos.clone());
+    } else {
+        compile_assign_rhs(a, chunk, resolutions)?;
+        let name = object_property_key_expr(&m.property);
+        if name.is_empty() {
+            return Err(unsupported(m.pos.clone(), "member property key"));
+        }
+        let name_idx = chunk.add_constant(str_obj(name));
+        chunk.write_op(Opcode::SetProperty, a.pos.clone());
+        chunk.write_u16(name_idx, a.pos.clone());
+    }
+    Ok(())
+}
+
+fn compile_index_assign(
+    a: &crate::ast::AssignExpr,
+    i: &crate::ast::IndexExpr,
+    chunk: &mut Chunk,
+    resolutions: &ResolutionMap,
+) -> Result<(), Object> {
+    compile_expr(&i.left, chunk, resolutions)?;
+    compile_expr(&i.index, chunk, resolutions)?;
+    compile_assign_rhs(a, chunk, resolutions)?;
+    chunk.write_op(Opcode::SetIndex, a.pos.clone());
+    Ok(())
+}
+
+fn compile_assign_rhs(
+    a: &crate::ast::AssignExpr,
+    chunk: &mut Chunk,
+    resolutions: &ResolutionMap,
+) -> Result<(), Object> {
+    if a.op != "=" {
+        return Err(unsupported(
+            a.pos.clone(),
+            &format!("compound assignment `{}` to member/index target", a.op),
+        ));
+    }
+    compile_expr(&a.right, chunk, resolutions)
 }
 /// Map a GTS infix operator string to its VM opcode. Returns `None` for
 /// operators not yet supported (bitwise, etc.) so the caller emits a clean

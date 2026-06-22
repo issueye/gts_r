@@ -219,7 +219,27 @@ impl<'a> VmState<'a> {
                     .stack
                     .pop()
                     .ok_or_else(|| self.stack_underflow(pos.clone()))?;
-                self.push_packed_arg(value, true, pos)?;
+                let target = self
+                    .stack
+                    .last()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?
+                    .clone();
+                match target {
+                    Object::Array(_) => self.push_packed_arg(value, true, pos)?,
+                    Object::Hash(hash) => {
+                        if let Object::Hash(source) = value {
+                            for (key, copied) in source.borrow().entries.iter() {
+                                hash.borrow_mut().set(key.clone(), copied.clone());
+                            }
+                        }
+                    }
+                    other => {
+                        return Err(new_error(
+                            pos,
+                            format!("VMError: SPREAD target is {}", other.type_tag()),
+                        ));
+                    }
+                }
             }
             Opcode::CallSpread => {
                 let pos = self.chunk.position_at(self.ip - 1);
@@ -307,16 +327,8 @@ impl<'a> VmState<'a> {
                     .stack
                     .pop()
                     .ok_or_else(|| self.stack_underflow(pos.clone()))?;
-                match &obj {
-                    Object::Hash(h) => h.borrow_mut().set(name, value),
-                    _ => {
-                        return Err(new_error(
-                            pos,
-                            format!("TypeError: cannot assign to property of {}", obj.type_tag()),
-                        ));
-                    }
-                }
-                self.stack.push(obj);
+                let assigned = assign_property(&obj, &name, value, pos)?;
+                self.stack.push(assigned);
             }
             Opcode::GetProperty => {
                 let name_idx = self.chunk.read_u16(self.ip) as usize;
@@ -348,6 +360,23 @@ impl<'a> VmState<'a> {
                     return Err(value);
                 }
                 self.stack.push(value);
+            }
+            Opcode::SetIndex => {
+                let pos = self.chunk.position_at(self.ip - 1);
+                let value = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                let key = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                let obj = self
+                    .stack
+                    .pop()
+                    .ok_or_else(|| self.stack_underflow(pos.clone()))?;
+                let assigned = assign_index(&obj, &key, value, pos)?;
+                self.stack.push(assigned);
             }
             Opcode::IterKeys | Opcode::IterValues => {
                 let pos = self.chunk.position_at(self.ip - 1);
@@ -754,6 +783,74 @@ enum Flow {
     Return(Object),
 }
 
+fn assign_property(
+    obj: &Object,
+    name: &str,
+    value: Object,
+    pos: Position,
+) -> Result<Object, Object> {
+    match obj {
+        Object::Hash(h) => {
+            if h.borrow().frozen {
+                return Err(new_error(pos, "TypeError: cannot assign to frozen object"));
+            }
+            if h.borrow().sealed && !h.borrow().contains(name) {
+                return Err(new_error(
+                    pos,
+                    "TypeError: cannot add property to sealed object",
+                ));
+            }
+            h.borrow_mut().set(name, value.clone());
+            Ok(value)
+        }
+        Object::Instance(i) => {
+            i.borrow_mut().props.insert(name.into(), value.clone());
+            Ok(value)
+        }
+        Object::Class(c) => {
+            c.borrow_mut().statics.insert(name.into(), value.clone());
+            Ok(value)
+        }
+        _ => Err(new_error(
+            pos,
+            format!("TypeError: cannot assign to property of {}", obj.type_tag()),
+        )),
+    }
+}
+
+fn assign_index(
+    obj: &Object,
+    key: &Object,
+    value: Object,
+    pos: Position,
+) -> Result<Object, Object> {
+    match obj {
+        Object::Array(a) => {
+            if let Object::Number(n) = key {
+                let i = *n as isize;
+                let mut arr = a.borrow_mut();
+                let len = arr.elements.len() as isize;
+                if i < 0 || i >= len {
+                    return Err(new_error(pos, "RangeError: array index out of bounds"));
+                }
+                arr.elements[i as usize] = value.clone();
+            }
+            Ok(value)
+        }
+        Object::Hash(h) => {
+            if h.borrow().frozen {
+                return Err(new_error(pos, "TypeError: cannot assign to frozen object"));
+            }
+            h.borrow_mut().set(key.inspect(), value.clone());
+            Ok(value)
+        }
+        _ => Err(new_error(
+            pos,
+            format!("TypeError: cannot index {}", obj.type_tag()),
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1085,6 +1182,42 @@ mod tests {
         assert!(matches!(
             run_src("let a = 3\nlet b = 4\na * b + b"),
             Object::Number(n) if n == 16.0));
+    }
+
+    #[test]
+    fn array_literal_spread_builds_flat_array() {
+        let result = run_src("let a = [1, 2]\nlet b = [0, ...a, 3]\nb[2]");
+        assert!(matches!(result, Object::Number(n) if n == 2.0));
+    }
+
+    #[test]
+    fn object_literal_supports_spread_and_computed_keys() {
+        let result = run_src(
+            "let key = \"b\"\nlet base = { a: 1 }\nlet obj = { ...base, [key]: 2 }\nobj.a + obj.b",
+        );
+        assert!(matches!(result, Object::Number(n) if n == 3.0));
+    }
+
+    #[test]
+    fn array_index_assignment_updates_element_and_returns_value() {
+        let result = run_src("let values = [1, 2, 3]\nvalues[1] = values[0] + values[2]");
+        assert!(matches!(result, Object::Number(n) if n == 4.0));
+
+        let updated =
+            run_src("let values = [1, 2, 3]\nvalues[1] = values[0] + values[2]\nvalues[1]");
+        assert!(matches!(updated, Object::Number(n) if n == 4.0));
+    }
+
+    #[test]
+    fn object_property_and_index_assignment_update_hash() {
+        let result =
+            run_src("let key = \"score\"\nlet doc = {}\ndoc[key] = 14\ndoc.score + doc[key]");
+        assert!(matches!(result, Object::Number(n) if n == 28.0));
+
+        let nested = run_src(
+            "let doc = { user: { score: 7 } }\ndoc.user.score = doc.user.score + 5\ndoc.user.score",
+        );
+        assert!(matches!(nested, Object::Number(n) if n == 12.0));
     }
 
     // —— control flow (stage 2.1) ——

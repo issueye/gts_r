@@ -157,8 +157,8 @@
 
 ## 阶段 5：对象模型全集
 
-- [ ] 5.1 `OpNewArray/NewObject/GetProperty/SetProperty/GetIndex/SetIndex/Spread`
-  - 证据：（待填）
+- [x] 5.1 `OpNewArray/NewObject/GetProperty/SetProperty/GetIndex/SetIndex/Spread`
+  - 证据：`src/bytecode/compiler.rs` 支持数组 spread 字面量、对象 spread/computed key、member/index 赋值目标；`src/bytecode/interp.rs` 实现 `SetIndex`，并让 `Spread` 同时支持数组追加与对象属性拷贝，`SetProperty/SetIndex` 对齐赋值表达式返回值；新增单测 `array_literal_spread_builds_flat_array`、`object_literal_supports_spread_and_computed_keys`、`array_index_assignment_updates_element_and_returns_value`、`object_property_and_index_assignment_update_hash`；`tests/bytecode_parity.rs` 纳入 `arrays_objects`、`array_index_assignment`、`object_computed_key`、`object_nested_access`；`cargo test --lib bytecode` 86 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed
 - [ ] 5.2 `OpNew/DefineMethod/NewClass`；`CallFrame.this` 绑定（对齐 `environment.rs:26-29`）
   - 证据：（待填）
 - [ ] 5.3 super 方法解析（复用 `methods.rs` 逻辑）；`build_class` 下沉到编译器
@@ -275,10 +275,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交，包含 Upvalue 两态模型、变量解析 pass、open upvalue 生命周期、upvalue 指令、闭包 parity fixture、debug/release 双跑
-**下一条 TODO**：进入阶段 5，推进 5.1 `OpNewArray/NewObject/GetProperty/SetProperty/GetIndex/SetIndex/Spread`
+**当前阶段**：阶段 2 控制流全集已提交；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构、ReturnNull、默认参数、rest、`arguments` 对象与调用位置 spread 实参；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`；阶段 4 闭包与 upvalue 已完成并提交；阶段 5.1 对象/数组基础 opcode 已完成并通过 VM parity
+**下一条 TODO**：继续阶段 5，推进 5.2 `OpNew/DefineMethod/NewClass` 与 `CallFrame.this` 绑定
 **阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
-**最后更新**：2026-06-22（阶段 4 已收口：提交 `806697e`/`355b982`/`f4e477e`/`8693e8a`/`1d32e82`/`e8c5c4e` 覆盖 4.1-4.6；阶段 4.6 debug/release 双跑证据：`cargo test --test bytecode_parity -- --nocapture` 1 passed；`cargo test --release --test bytecode_parity -- --nocapture` 1 passed；`cargo test --lib bytecode` 82 passed；`cargo test --release --lib bytecode` 82 passed；下一步进入阶段 5 对象模型）
+**最后更新**：2026-06-22（阶段 5.1 已完成：数组/对象字面量、属性/索引读写、数组与对象 spread；`cargo test --lib bytecode` 86 passed；`cargo test --test bytecode_parity -- --nocapture` 1 passed，新增覆盖 `arrays_objects`、`array_index_assignment`、`object_computed_key`、`object_nested_access`；阶段 4 已收口提交 `806697e`/`355b982`/`f4e477e`/`8693e8a`/`1d32e82`/`e8c5c4e`）
 
 ---
 

@@ -172,6 +172,22 @@ fn stage_1_3_fixtures() -> Vec<Fixture> {
             dir: "closure_returned_frame",
             expected: "closure-returned-frame=42\n",
         },
+        Fixture {
+            dir: "arrays_objects",
+            expected: "arrays-objects=3:3:8:gts:1\n",
+        },
+        Fixture {
+            dir: "array_index_assignment",
+            expected: "array-index-assignment=1,4,3\n",
+        },
+        Fixture {
+            dir: "object_computed_key",
+            expected: "object-computed-key=14:14\n",
+        },
+        Fixture {
+            dir: "object_nested_access",
+            expected: "object-nested-access=ada:12\n",
+        },
     ]
 }
 
