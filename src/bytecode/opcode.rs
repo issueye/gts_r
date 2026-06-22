@@ -103,6 +103,12 @@ pub enum Opcode {
     DefineMethod = 78,
     /// Operand: u16 class name index.
     New = 79,
+    /// Convert the top value to an array of for-in keys.
+    IterKeys = 80,
+    /// Convert the top value to an array of for-of values.
+    IterValues = 81,
+    /// Push the length/size of the top collection-like value.
+    Len = 82,
 
     // —— errors / async ——
     Throw = 90,
@@ -168,6 +174,9 @@ impl Opcode {
             77 => Opcode::NewClass,
             78 => Opcode::DefineMethod,
             79 => Opcode::New,
+            80 => Opcode::IterKeys,
+            81 => Opcode::IterValues,
+            82 => Opcode::Len,
             90 => Opcode::Throw,
             91 => Opcode::Await,
             92 => Opcode::ToString,
@@ -227,6 +236,9 @@ impl Opcode {
             Opcode::NewClass => "NEW_CLASS",
             Opcode::DefineMethod => "DEFINE_METHOD",
             Opcode::New => "NEW",
+            Opcode::IterKeys => "ITER_KEYS",
+            Opcode::IterValues => "ITER_VALUES",
+            Opcode::Len => "LEN",
             Opcode::Throw => "THROW",
             Opcode::Await => "AWAIT",
             Opcode::ToString => "TO_STRING",

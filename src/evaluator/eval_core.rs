@@ -316,6 +316,18 @@ pub fn iterable_keys(obj: &Object) -> Vec<String> {
             .map(|(k, _)| k.clone())
             .collect(),
         Object::String(s) => (0..s.chars().count()).map(|i| i.to_string()).collect(),
+        Object::Map(m) => m
+            .borrow()
+            .entries
+            .iter()
+            .map(|(_, key, _)| key.inspect())
+            .collect(),
+        Object::Set(s) => s
+            .borrow()
+            .entries
+            .iter()
+            .map(|(_, value)| value.inspect())
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -331,6 +343,18 @@ pub fn iterable_values(obj: &Object) -> Vec<Object> {
             .map(|(_, v)| v.clone())
             .collect(),
         Object::String(s) => s.chars().map(|c| str_obj(c.to_string())).collect(),
+        Object::Map(m) => m
+            .borrow()
+            .entries
+            .iter()
+            .map(|(_, _, value)| value.clone())
+            .collect(),
+        Object::Set(s) => s
+            .borrow()
+            .entries
+            .iter()
+            .map(|(_, value)| value.clone())
+            .collect(),
         _ => Vec::new(),
     }
 }

@@ -16,8 +16,10 @@ use crate::evaluator::string_lit::{eval_regexp_lit, eval_string_lit};
 use crate::lexer::Lexer;
 use crate::object::{bool_obj, new_error, num_obj, str_obj, Object};
 use crate::parser::Parser;
+use std::rc::Rc;
 
 use super::chunk::Chunk;
+use super::closure::FunctionProto;
 use super::opcode::Opcode;
 
 /// Compile a whole program. Emits each statement in order followed by a
@@ -38,6 +40,8 @@ pub fn compile(program: &Program) -> Result<Chunk, Object> {
 /// `continue` (jump to the post-expression / condition re-test).
 #[derive(Default)]
 struct LoopFrame {
+    /// Optional label attached to this loop.
+    label: Option<String>,
     /// Byte offsets of pending `break` jumps (each is a JUMP placeholder).
     breaks: Vec<u32>,
     /// Byte offsets of pending `continue` jumps.
@@ -71,10 +75,62 @@ fn compile_stmt(
             Ok(())
         }
         Stmt::If(s) => compile_if(s, chunk, loops, keep_value),
-        Stmt::While(s) => compile_while(s, chunk, loops, keep_value),
-        Stmt::For(s) => compile_for(s, chunk, loops, keep_value),
+        Stmt::While(s) => compile_while(s, None, chunk, loops, keep_value),
+        Stmt::For(s) => compile_for(s, None, chunk, loops, keep_value),
+        Stmt::ForIn(s) => compile_for_iter(
+            &s.name,
+            &s.iterable,
+            &s.body,
+            Opcode::IterKeys,
+            s.pos.clone(),
+            None,
+            chunk,
+            loops,
+        ),
+        Stmt::ForOf(s) => compile_for_iter(
+            &s.name,
+            &s.iterable,
+            &s.body,
+            Opcode::IterValues,
+            s.pos.clone(),
+            None,
+            chunk,
+            loops,
+        ),
         Stmt::Break(s) => compile_break_continue(true, &s.label, s.pos.clone(), chunk, loops),
         Stmt::Continue(s) => compile_break_continue(false, &s.label, s.pos.clone(), chunk, loops),
+        Stmt::Labeled(s) => compile_labeled(s, chunk, loops, keep_value),
+        Stmt::FuncDecl(f) => {
+            // Compile the body to a proto (which lives in this chunk's proto
+            // table), emit OP_CLOSURE to construct the closure value, then
+            // store it under the function's name.
+            let proto_idx = compile_function_proto(
+                &f.name,
+                f.params.clone(),
+                f.body.clone(),
+                f.is_async,
+                false,
+                f.return_t.clone(),
+                f.pos.clone(),
+                chunk,
+            )?;
+            chunk.write_op(Opcode::Closure, f.pos.clone());
+            chunk.write_u16(proto_idx, f.pos.clone());
+            let name_idx = chunk.add_constant(str_obj(f.name.clone()));
+            chunk.write_op(Opcode::StoreName, f.pos.clone());
+            chunk.write_u16(name_idx, f.pos.clone());
+            Ok(())
+        }
+        Stmt::Return(r) => {
+            if let Some(v) = &r.value {
+                compile_expr(v, chunk)?;
+            } else {
+                let idx = chunk.add_constant(Object::Undefined);
+                emit_const(chunk, idx, r.pos.clone());
+            }
+            chunk.write_op(Opcode::Return, r.pos.clone());
+            Ok(())
+        }
         _ => Err(unsupported(stmt.pos(), &format!("statement {:?}", stmt))),
     }
 }
@@ -110,6 +166,7 @@ fn compile_if(
 /// Compile `while (cond) { body }`.
 fn compile_while(
     s: &crate::ast::WhileStmt,
+    label: Option<String>,
     chunk: &mut Chunk,
     loops: &mut Vec<LoopFrame>,
     _keep_value: bool,
@@ -118,7 +175,10 @@ fn compile_while(
     let start = chunk.code.len() as u32;
     compile_expr(&s.cond, chunk)?;
     let to_end = emit_jump_placeholder(chunk, Opcode::JumpIfFalse, s.pos.clone());
-    loops.push(LoopFrame::default());
+    loops.push(LoopFrame {
+        label,
+        ..LoopFrame::default()
+    });
     for stmt in &s.body.statements {
         compile_stmt(stmt, chunk, loops, false)?;
     }
@@ -141,6 +201,7 @@ fn compile_while(
 /// Compile `for (init; cond; post) { body }`.
 fn compile_for(
     s: &crate::ast::ForStmt,
+    label: Option<String>,
     chunk: &mut Chunk,
     loops: &mut Vec<LoopFrame>,
     _keep_value: bool,
@@ -153,9 +214,16 @@ fn compile_for(
     let mut to_end: Option<u32> = None;
     if let Some(cond) = &s.cond {
         compile_expr(cond, chunk)?;
-        to_end = Some(emit_jump_placeholder(chunk, Opcode::JumpIfFalse, s.pos.clone()));
+        to_end = Some(emit_jump_placeholder(
+            chunk,
+            Opcode::JumpIfFalse,
+            s.pos.clone(),
+        ));
     }
-    loops.push(LoopFrame::default());
+    loops.push(LoopFrame {
+        label,
+        ..LoopFrame::default()
+    });
     for stmt in &s.body.statements {
         compile_stmt(stmt, chunk, loops, false)?;
     }
@@ -182,22 +250,149 @@ fn compile_for(
     Ok(())
 }
 
+fn compile_for_iter(
+    name: &str,
+    iterable: &Expr,
+    body: &crate::ast::BlockStmt,
+    iter_op: Opcode,
+    pos: crate::ast::Position,
+    label: Option<String>,
+    chunk: &mut Chunk,
+    loops: &mut Vec<LoopFrame>,
+) -> Result<(), Object> {
+    let suffix = format!("{}_{}", pos.line, pos.col);
+    let items_name = format!("__gts_bc_iter_items_{}", suffix);
+    let idx_name = format!("__gts_bc_iter_idx_{}", suffix);
+
+    // items = ITER_KEYS/ITER_VALUES(iterable)
+    compile_expr(iterable, chunk)?;
+    chunk.write_op(iter_op, pos.clone());
+    let items_idx = chunk.add_constant(str_obj(items_name.clone()));
+    chunk.write_op(Opcode::StoreName, pos.clone());
+    chunk.write_u16(items_idx, pos.clone());
+
+    // idx = 0
+    let zero = chunk.add_constant(num_obj(0.0));
+    emit_const(chunk, zero, pos.clone());
+    let idx_idx = chunk.add_constant(str_obj(idx_name.clone()));
+    chunk.write_op(Opcode::StoreName, pos.clone());
+    chunk.write_u16(idx_idx, pos.clone());
+
+    // start: idx < len(items)
+    let start = chunk.code.len() as u32;
+    emit_load_name(chunk, &idx_name, pos.clone());
+    emit_load_name(chunk, &items_name, pos.clone());
+    chunk.write_op(Opcode::Len, pos.clone());
+    chunk.write_op(Opcode::Lt, pos.clone());
+    let to_end = emit_jump_placeholder(chunk, Opcode::JumpIfFalse, pos.clone());
+
+    // loop variable = items[idx]
+    emit_load_name(chunk, &items_name, pos.clone());
+    emit_load_name(chunk, &idx_name, pos.clone());
+    chunk.write_op(Opcode::GetIndex, pos.clone());
+    let name_idx = chunk.add_constant(str_obj(name.to_string()));
+    chunk.write_op(Opcode::StoreName, pos.clone());
+    chunk.write_u16(name_idx, pos.clone());
+
+    loops.push(LoopFrame {
+        label,
+        ..LoopFrame::default()
+    });
+    for stmt in &body.statements {
+        compile_stmt(stmt, chunk, loops, false)?;
+    }
+    let frame = loops.pop().unwrap();
+
+    // continue target: idx = idx + 1
+    let increment = chunk.code.len() as u32;
+    emit_load_name(chunk, &idx_name, pos.clone());
+    let one = chunk.add_constant(num_obj(1.0));
+    emit_const(chunk, one, pos.clone());
+    chunk.write_op(Opcode::Add, pos.clone());
+    chunk.write_op(Opcode::Dup, pos.clone());
+    let idx_idx = chunk.add_constant(str_obj(idx_name));
+    chunk.write_op(Opcode::AssignName, pos.clone());
+    chunk.write_u16(idx_idx, pos.clone());
+    chunk.write_op(Opcode::Pop, pos.clone());
+    chunk.write_op(Opcode::Loop, pos.clone());
+    chunk.write_u32(start, pos.clone());
+
+    let end = chunk.code.len() as u32;
+    patch_jump_here(chunk, to_end);
+    for b in &frame.breaks {
+        patch_jump_to(chunk, *b, end);
+    }
+    for c in &frame.continues {
+        patch_jump_to(chunk, *c, increment);
+    }
+    Ok(())
+}
+
+fn compile_labeled(
+    s: &crate::ast::LabeledStmt,
+    chunk: &mut Chunk,
+    loops: &mut Vec<LoopFrame>,
+    keep_value: bool,
+) -> Result<(), Object> {
+    match s.stmt.as_ref() {
+        Stmt::While(w) => compile_while(w, Some(s.label.clone()), chunk, loops, keep_value),
+        Stmt::For(f) => compile_for(f, Some(s.label.clone()), chunk, loops, keep_value),
+        Stmt::ForIn(f) => compile_for_iter(
+            &f.name,
+            &f.iterable,
+            &f.body,
+            Opcode::IterKeys,
+            f.pos.clone(),
+            Some(s.label.clone()),
+            chunk,
+            loops,
+        ),
+        Stmt::ForOf(f) => compile_for_iter(
+            &f.name,
+            &f.iterable,
+            &f.body,
+            Opcode::IterValues,
+            f.pos.clone(),
+            Some(s.label.clone()),
+            chunk,
+            loops,
+        ),
+        other => compile_stmt(other, chunk, loops, keep_value),
+    }
+}
+
 /// Compile `break` (is_break=true) or `continue`. Records a pending JUMP in
 /// the current loop frame to be patched when the loop's end / continue-target
 /// is known. Labeled break/continue is stage 2 polish (defers to plain).
 fn compile_break_continue(
     is_break: bool,
-    _label: &str,
+    label: &str,
     pos: crate::ast::Position,
     chunk: &mut Chunk,
     loops: &mut Vec<LoopFrame>,
 ) -> Result<(), Object> {
-    let frame = match loops.last_mut() {
+    let frame = match loops.iter_mut().rev().find(|f| {
+        label.is_empty()
+            || f.label
+                .as_ref()
+                .map(|frame_label| frame_label == label)
+                .unwrap_or(false)
+    }) {
         Some(f) => f,
         None => {
             return Err(unsupported(
                 pos,
-                if is_break { "break outside loop" } else { "continue outside loop" },
+                if label.is_empty() {
+                    if is_break {
+                        "break outside loop"
+                    } else {
+                        "continue outside loop"
+                    }
+                } else if is_break {
+                    "labeled break target"
+                } else {
+                    "labeled continue target"
+                },
             ));
         }
     };
@@ -262,8 +457,7 @@ fn compile_template_interpolated(
         }
         // Collect a run of literal chars up to the next `${`.
         let start = i;
-        while i < bytes.len()
-            && !(i + 1 < bytes.len() && bytes[i] == b'$' && bytes[i + 1] == b'{')
+        while i < bytes.len() && !(i + 1 < bytes.len() && bytes[i] == b'$' && bytes[i + 1] == b'{')
         {
             i += 1;
         }
@@ -353,7 +547,83 @@ fn patch_jump_to(chunk: &mut Chunk, operand_ip: u32, target: u32) {
     chunk.code[ip + 3] = bytes[3];
 }
 
-/// Compile a `let`/`var`/`const` declaration.
+/// Compile a function body into a sub-Chunk, register a `FunctionProto` on
+/// the *parent* chunk's proto table, and return the proto index.
+///
+/// The body is compiled with its own statement stream and a trailing RETURN
+/// (returning the last statement's value, or Undefined). Parameters are bound
+/// by the interpreter at call time into the call environment, so the body's
+/// parameter references resolve as plain `LoadName`.
+fn compile_function_proto(
+    name: &str,
+    params: Vec<crate::ast::Param>,
+    body: crate::ast::BlockStmt,
+    is_async: bool,
+    lexical_this: bool,
+    return_t: Option<crate::ast::TypeAnnotation>,
+    pos: crate::ast::Position,
+    parent: &mut Chunk,
+) -> Result<u16, Object> {
+    let mut sub = Chunk::new();
+    let mut loops: Vec<LoopFrame> = Vec::new();
+    let n = body.statements.len();
+    for (i, stmt) in body.statements.iter().enumerate() {
+        compile_stmt(stmt, &mut sub, &mut loops, i + 1 == n)?;
+    }
+    // If the body didn't end in an explicit RETURN, emit one so the call
+    // always returns (the last value, or Undefined).
+    if !matches_last_opcode(&sub, Opcode::Return) {
+        sub.write_op(Opcode::Return, pos.clone());
+    }
+    let proto = FunctionProto::new(name, params, body, is_async, lexical_this, return_t, pos);
+    let idx = parent.protos.len() as u16;
+    // Fill the chunk before moving proto into the table (borrow then push).
+    *proto.chunk.borrow_mut() = Some(Rc::new(sub));
+    parent.protos.push(proto);
+    Ok(idx)
+}
+
+/// True if the last instruction in the chunk is `op`.
+fn matches_last_opcode(chunk: &Chunk, op: Opcode) -> bool {
+    // Walk backwards skipping operand bytes is hard; instead scan forward with
+    // known operand widths. For stage 3 the only opcodes with operands in a
+    // function body are Const/LoadName/StoreName/AssignName/Call/Closure (u16)
+    // and Jump/JumpIfFalse/JumpIfTrue/Loop (u32). Simpler: track the opcode
+    // positions by scanning.
+    let mut ip = 0;
+    let mut last_op = None;
+    while ip < chunk.code.len() {
+        let b = chunk.code[ip];
+        last_op = Opcode::from_byte(b);
+        ip += 1;
+        // skip operands based on the opcode
+        if let Some(o) = last_op {
+            ip += operand_width(o) as usize;
+        }
+    }
+    last_op == Some(op)
+}
+
+/// Byte width of the operand for an opcode (0 if none).
+fn operand_width(op: Opcode) -> u8 {
+    match op {
+        Opcode::Const
+        | Opcode::LoadName
+        | Opcode::StoreName
+        | Opcode::AssignName
+        | Opcode::GetProperty
+        | Opcode::SetProperty
+        | Opcode::DefineMethod
+        | Opcode::NewClass
+        | Opcode::SuperMethod
+        | Opcode::NewArray
+        | Opcode::New
+        | Opcode::Call
+        | Opcode::Closure => 2,
+        Opcode::Jump | Opcode::JumpIfFalse | Opcode::JumpIfTrue | Opcode::Loop => 4,
+        _ => 0,
+    }
+}
 ///
 /// Stage 1 keeps all variables in the (root) environment's name table, so a
 /// declaration evaluates its initializer (if any) and emits a STORE_NAME.
@@ -377,7 +647,11 @@ fn compile_decl(
     // Encode const-ness in the high bit of the name index operand so the
     // interpreter knows which binding flavor to create. (Name pools stay
     // small; a u16 with a flag bit is plenty.)
-    let operand = if is_const { name_idx | 0x8000 } else { name_idx };
+    let operand = if is_const {
+        name_idx | 0x8000
+    } else {
+        name_idx
+    };
     chunk.write_op(Opcode::StoreName, pos.clone());
     chunk.write_u16(operand, pos);
     Ok(())
@@ -450,6 +724,34 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
                 return Ok(());
             }
             compile_template_interpolated(t, chunk)
+        }
+        Expr::Array(a) => {
+            for element in &a.elements {
+                if matches!(element, Expr::Spread(_)) {
+                    return Err(unsupported(element.pos(), "array spread literal element"));
+                }
+                compile_expr(element, chunk)?;
+            }
+            chunk.write_op(Opcode::NewArray, a.pos.clone());
+            chunk.write_u16(a.elements.len() as u16, a.pos.clone());
+            Ok(())
+        }
+        Expr::Object(o) => {
+            chunk.write_op(Opcode::NewObject, o.pos.clone());
+            for prop in &o.properties {
+                if prop.spread || prop.computed || prop.is_accessor {
+                    return Err(unsupported(
+                        prop.pos.clone(),
+                        "object spread/computed/accessor property",
+                    ));
+                }
+                compile_expr(&prop.value, chunk)?;
+                let key = object_property_key(prop)?;
+                let key_idx = chunk.add_constant(str_obj(key));
+                chunk.write_op(Opcode::SetProperty, prop.pos.clone());
+                chunk.write_u16(key_idx, prop.pos.clone());
+            }
+            Ok(())
         }
 
         // —— prefix ——
@@ -529,9 +831,6 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
 
         // —— function call (callee + args, then CALL) ——
         Expr::Call(c) => {
-            // Stage 2.1 supports calling builtins (println, etc.) and any
-            // callable reachable by name. Compile callee, then each arg, then
-            // a CALL with the arg count.
             compile_expr(&c.callee, chunk)?;
             for arg in &c.args {
                 compile_expr(arg, chunk)?;
@@ -541,7 +840,113 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk) -> Result<(), Object> {
             chunk.write_u16(arg_count, c.pos.clone());
             Ok(())
         }
+        Expr::Member(m) => {
+            compile_expr(&m.object, chunk)?;
+            if m.computed {
+                compile_expr(&m.property, chunk)?;
+                chunk.write_op(Opcode::GetIndex, m.pos.clone());
+            } else {
+                let name = object_property_key_expr(&m.property);
+                if name.is_empty() {
+                    return Err(unsupported(m.pos.clone(), "member property key"));
+                }
+                let name_idx = chunk.add_constant(str_obj(name));
+                chunk.write_op(Opcode::GetProperty, m.pos.clone());
+                chunk.write_u16(name_idx, m.pos.clone());
+            }
+            Ok(())
+        }
+        Expr::Index(i) => {
+            compile_expr(&i.left, chunk)?;
+            compile_expr(&i.index, chunk)?;
+            chunk.write_op(Opcode::GetIndex, i.pos.clone());
+            Ok(())
+        }
+        Expr::New(n) => {
+            compile_expr(&n.callee, chunk)?;
+            for arg in &n.args {
+                compile_expr(arg, chunk)?;
+            }
+            chunk.write_op(Opcode::New, n.pos.clone());
+            chunk.write_u16(n.args.len() as u16, n.pos.clone());
+            Ok(())
+        }
+        // —— function expression ——
+        Expr::Func(f) => {
+            let idx = compile_function_proto(
+                &f.name,
+                f.params.clone(),
+                f.body.clone(),
+                f.is_async,
+                false,
+                f.return_t.clone(),
+                f.pos.clone(),
+                chunk,
+            )?;
+            chunk.write_op(Opcode::Closure, f.pos.clone());
+            chunk.write_u16(idx, f.pos.clone());
+            Ok(())
+        }
+        // —— arrow function ——
+        Expr::Arrow(a) => {
+            // Arrow body: either an expression (implicit return) or a block.
+            let body = match &a.body {
+                crate::ast::ArrowBody::Expr(e) => {
+                    // Wrap the expression in a single return statement.
+                    crate::ast::BlockStmt {
+                        pos: a.pos.clone(),
+                        statements: vec![Stmt::Return(crate::ast::ReturnStmt {
+                            pos: a.pos.clone(),
+                            value: Some(e.clone()),
+                        })],
+                    }
+                }
+                crate::ast::ArrowBody::Block(b) => b.clone(),
+            };
+            let idx = compile_function_proto(
+                "",
+                a.params.clone(),
+                body,
+                a.is_async,
+                true, // arrow functions capture `this` lexically
+                a.return_t.clone(),
+                a.pos.clone(),
+                chunk,
+            )?;
+            chunk.write_op(Opcode::Closure, a.pos.clone());
+            chunk.write_u16(idx, a.pos.clone());
+            Ok(())
+        }
         _ => Err(unsupported(expr.pos(), &format!("expression {:?}", expr))),
+    }
+}
+
+fn emit_load_name(chunk: &mut Chunk, name: &str, pos: crate::ast::Position) {
+    let idx = chunk.add_constant(str_obj(name.to_string()));
+    chunk.write_op(Opcode::LoadName, pos.clone());
+    chunk.write_u16(idx, pos);
+}
+
+fn object_property_key(prop: &crate::ast::Property) -> Result<String, Object> {
+    if prop.shorthand {
+        if let Expr::Ident(i) = &prop.key {
+            return Ok(i.name.clone());
+        }
+    }
+    let key = object_property_key_expr(&prop.key);
+    if key.is_empty() {
+        Err(unsupported(prop.pos.clone(), "object property key"))
+    } else {
+        Ok(key)
+    }
+}
+
+fn object_property_key_expr(expr: &Expr) -> String {
+    match expr {
+        Expr::Ident(i) => i.name.clone(),
+        Expr::String(s) => crate::evaluator::eval_core::strip_quotes(&s.literal),
+        Expr::Number(n) => crate::object::format_number(n.value),
+        _ => String::new(),
     }
 }
 
@@ -747,13 +1152,16 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_node() {
-        // Function declarations are stage 3; the compiler must refuse rather
-        // than silently miscompile. (Previously this tested `let`, which is
-        // now supported in stage 1.3.)
-        let lexer = Lexer::new("function f() { return 1 }");
+        // try/catch is stage 6; the compiler must refuse rather than silently
+        // miscompile. (Earlier this tested `let`, then `function` — both now
+        // supported.)
+        let lexer = Lexer::new("try { 1 } catch (e) { 2 }");
         let mut parser = Parser::new(lexer, "t.gs");
         let program = parser.parse_program();
         let result = compile(&program);
-        assert!(result.is_err(), "function decl should not compile before stage 3");
+        assert!(
+            result.is_err(),
+            "try/catch should not compile before stage 6"
+        );
     }
 }

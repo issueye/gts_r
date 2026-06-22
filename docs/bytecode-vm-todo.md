@@ -87,43 +87,45 @@
   - 证据：LoopFrame + compile_break_continue 收集待回填跳转，循环结束时 patch 到 end(while)或 post_start(for)
 - [x] 2.3 `For/While` 编译；`If/Else` 跳转
   - 证据：compile_if/compile_while/compile_for；修了 for-continue 的 post_start 偏移 bug(原本指向 body 起点导致死循环)；Stmt::Block + 表达式语句 keep_value 语义(顶层末语句保留值,其余 pop)
-- [ ] 2.4 迭代器协议：`ForIn`（遍历 key）、`ForOf`（遍历 value），支持 Array/String/Map/Set
-  - 证据：（待填）
-- [ ] 2.5 **补 fixture**（先在树遍历下验证绿）：`for_in_object`、`for_of_array`、`labeled_break`
-  - 证据：（待填树遍历下三例绿）
-- [ ] 2.6 阶段 2 契约门（VM 单跑全绿）：
-  - [ ] `control_flow` `03_control_flow`
-  - [ ] `while_continue`
-  - [ ] `for_break`
-  - [ ] `nested_loops`
-  - [ ] `loop_array_build`
-  - [ ] 新补 `for_in_object` `for_of_array` `labeled_break`
-  - 证据：（待填）
-- [ ] 2.7 **质心收益证据**：`for(i=0;i<1_000_000;i++){}` 堆分配次数 VM ≪ 树遍历（树遍历每轮 2 个 ErrorData）
-  - 证据：（待填分配数对比）
-- [ ] 2.8 提交 `[bytecode-2] 控制流`
+- [x] 2.4 迭代器协议：`ForIn`（遍历 key）、`ForOf`（遍历 value），支持 Array/String/Map/Set
+  - 证据：新增 `Opcode::IterKeys/IterValues/Len` + 编译器 `compile_for_iter` 将 ForIn/ForOf 降为普通索引循环；interp 复用 `iterable_keys/iterable_values` 并支持 Array/String/Hash/Map/Set；`for_of_array` fixture 覆盖 Array/String/Map/Set 值遍历，`for_in_object` 覆盖对象 key 遍历；`cargo test --test bytecode_parity -- --nocapture` ok
+- [x] 2.5 **补 fixture**（先在树遍历下验证绿）：`for_in_object`、`for_of_array`、`labeled_break`
+  - 证据：新增 `tests/fixtures/parity/{for_in_object,for_of_array,labeled_break}/main.gs`；树遍历 CLI 输出分别为 `for-in-object=abc`、`for-of-array=6:go:5:xy`、`labeled-break=1`
+- [x] 2.6 阶段 2 契约门（VM 单跑全绿）：
+  - [x] `control_flow`（当前 parity 目录无独立 `03_control_flow` fixture）
+  - [x] `while_continue`
+  - [x] `for_break`
+  - [x] `nested_loops`
+  - [x] `loop_array_build`
+  - [x] 新补 `for_in_object` `for_of_array` `labeled_break`
+  - 证据：`tests/bytecode_parity.rs::bytecode_vm_matches_stage_1_2_fixtures` 覆盖上述 fixture 并通过；新增 VM 单测 `bytecode::interp::tests::labeled_break_exits_outer_loop` 覆盖跳出外层循环；`cargo test --lib bytecode` 68 passed；`cargo test --tests` 前序语言/stdlib 多套件通过，但 `tests/stdlib_p8_exec.rs` 5 例因外部程序 `program not found` 失败（非 VM 路径）
+- [x] 2.7 **质心收益证据**：`for(i=0;i<1_000_000;i++){}` 堆分配次数 VM ≪ 树遍历（树遍历热循环每轮创建 block scope）
+  - 证据：新增独立测量单元 `tests/bytecode_alloc.rs::million_empty_for_loop_allocates_far_less_on_bytecode_vm`（默认 ignored，避免拖慢常规测试）；命令 `cargo test --test bytecode_alloc -- --ignored --nocapture` 输出 `stage2_hot_loop_allocations tree_walk=1000003 bytecode_vm=15 ratio=66666.9x tree_elapsed_ms=1580 vm_elapsed_ms=1208 tree_deallocs=1000001 vm_deallocs=13`；VM 变量名热路径改为借用常量池字符串，避免每次 `LoadName/AssignName` 重新分配
+- [x] 2.8 提交 `[bytecode-2] 控制流`
+  - 证据：提交 `9e9e1c5 feat(bytecode): advance control flow and function frames`，包含阶段 2 控制流/迭代器/分配证据与阶段 3 函数帧结构进展
 
 ---
 
 ## 阶段 3：函数 + CallFrame + native 互调
 
-- [ ] 3.1 实现 `src/bytecode/closure.rs`：`FunctionProto`（含 chunk 片段/arity/param_slots/upvalue_desc/is_async/lexical_this/pos）+ `ClosureData`
-  - 证据：（待填）
-- [ ] 3.2 实现 `src/bytecode/frame.rs`：`CallFrame { ip, proto, slots, upvalues, this, slot_base }`
-  - 证据：（待填）
-- [ ] 3.3 `Object` 新增变体 `Object::Closure(Rc<ClosureData>)`（`object/value.rs`，纯新增）
-  - 证据：（待填）
-- [ ] 3.4 实现 `OpClosure/Call/Return/ReturnNull`；调用约定（callee 栈顶、参数紧贴其下）
-  - 证据：（待填）
-- [ ] 3.5 **关键桥接**：`evaluator/expressions.rs:745 apply_function` + `methods.rs` 同名点新增 `Object::Closure` 臂，委托 `bytecode::interp::call_closure`
-  - 证据：（待填：native 调 VM 闭包路径打通）
-- [ ] 3.6 参数默认值 / spread / `arguments` 对象（对齐现有 `bind_params`）
-  - 证据：（待填）
-- [ ] 3.7 阶段 3 契约门（VM 单跑全绿）：
-  - [ ] `04_functions` `function_call` `recursive_function`
-  - [ ] `string_methods`（native 方法回调）
-  - [ ] **native↔VM 互调专项**：`[1,2,3].map(x=>x*2)` 在 VM 下绿
-  - 证据：（待填）
+- [x] 3.1 实现 `src/bytecode/closure.rs`：`FunctionProto`（含 chunk 片段/arity/param_slots/upvalue_desc/is_async/lexical_this/pos）+ `ClosureData`
+  - 证据：`src/bytecode/closure.rs` 已有 `FunctionProto { name, params, arity, param_slots, upvalue_desc, body, is_async, lexical_this, return_t, pos, chunk }` + `ClosureData { proto, home_env }`；`ParamSlot` 记录参数槽/默认值/rest/optional；`UpvalueDesc`/`UpvalueSource` 结构已固化（阶段 4 负责填充非空描述）；单测 `bytecode::closure::tests::function_proto_records_arity_and_param_slots` ok
+- [x] 3.2 实现 `src/bytecode/frame.rs`：`CallFrame { ip, proto, slots, upvalues, this, slot_base }`
+  - 证据：新增 `src/bytecode/frame.rs`，包含 `CallFrame { ip, proto, slots, upvalues, this, slot_base }` 与 `FrameUpvalue`；`bytecode::call::call_closure_impl` 在参数绑定后构造 stage-3 frame metadata；单测 `bytecode::frame::tests::frame_mirrors_bound_params_into_slots` ok
+- [x] 3.3 `Object` 新增变体 `Object::Closure(Rc<ClosureData>)`（`object/value.rs`，纯新增）
+  - 证据：`src/object/value.rs` 已有 `Object::Closure(Rc<crate::bytecode::closure::ClosureData>)`；`inspect/type_tag/equals` 均有 Closure 分支
+- [x] 3.4 实现 `OpClosure/Call/Return/ReturnNull`；调用约定（callee 栈顶、参数紧贴其下）
+  - 证据：`Opcode::Closure/Call/Return/ReturnNull` 均有解释器执行分支；`src/bytecode/interp.rs` 的 `Call` 按 `[..., callee, arg1, ..., argN]` 拆栈并调用；函数声明/表达式/箭头函数/递归函数单测通过；`bytecode::interp::tests::return_null_opcode_returns_null` 覆盖 `ReturnNull`
+- [x] 3.5 **关键桥接**：`evaluator/expressions.rs:745 apply_function` + `methods.rs` 同名点新增 `Object::Closure` 臂，委托 `bytecode::interp::call_closure`
+  - 证据：按功能拆分为 `src/bytecode/call.rs`；`apply_function` 的 `Object::Closure` 分支委托 `bytecode::call::call_closure_object`；新增 `array_map_callback` fixture 覆盖 `[1,2,3].map((value)=>value*2)` native→VM 闭包回调，`cargo test --test bytecode_parity -- --nocapture` ok
+- [~] 3.6 参数默认值 / spread / `arguments` 对象（对齐现有 `bind_params`）
+  - 证据：VM 闭包调用复用 `evaluator::expressions::bind_params`；`function_params` fixture 覆盖默认参数（缺席实参触发默认值，显式 `undefined` 保持 undefined），树遍历与 VM 输出均为 `function-params=item:undefined:key`；新增 `function_rest_params` fixture 覆盖 rest 参数，树遍历与 VM 输出均为 `function-rest-params=v:1|2|3:3`；调用位置 spread 实参与 `arguments` 对象仍需后续补齐
+- [~] 3.7 阶段 3 契约门（VM 单跑全绿）：
+  - [x] `function_call` `recursive_function`
+  - [x] `function_params` `function_rest_params`
+  - [x] `string_methods`（native 方法回调）
+  - [x] **native↔VM 互调专项**：`array_map_callback` 即 `[1,2,3].map((value)=>value*2)` 在 VM 下绿
+  - 证据：`tests/bytecode_parity.rs::bytecode_vm_matches_stage_1_3_fixtures` 当前覆盖 `function_call`、`recursive_function`、`function_params`、`function_rest_params`、`string_methods`、`array_map_callback` 并通过；`cargo test --lib bytecode` 71 passed；剩余调用位置 spread 实参/`arguments` 对象/本地 upvalue 后才能收口阶段 3
 - [ ] 3.8 覆盖度核对：`Func/Arrow/Call/FuncDecl` 打勾
 - [ ] 3.9 提交 `[bytecode-3] 函数与 native 互调`
 
@@ -269,10 +271,10 @@
 
 > **续工时从这里开始。**
 
-**当前阶段**：阶段 2 控制流 + 模板插值 + println 桥接完成（2.1/2.2/2.3 + 1.5 parity 端到端达成）
-**下一条 TODO**：2.4 迭代器协议 ForIn/ForOf（支持 Array/String/Map/Set），需先有对象模型(stage 5)或最小数组支持
-**阻断**：无（for-in/for-of 依赖数组/对象，归并到 stage 5 对象模型后补；nested_loops/loop_array_build fixture 同理）
-**最后更新**：2026-06-22（2.1 全绿，待提交）
+**当前阶段**：阶段 2 控制流全集已完成到 2.7；阶段 3 已完成 Closure 变体、函数调用主路径、native→VM 回调桥接、函数原型元数据、CallFrame 结构与 ReturnNull 执行分支；调用逻辑已拆到 `src/bytecode/call.rs`，帧模型拆到 `src/bytecode/frame.rs`
+**下一条 TODO**：继续 3.6，补调用位置 spread 实参与 `arguments` 对象，再进入本地 upvalue/闭包收口
+**阻断**：宽测试 `cargo test --tests` 仍有 `stdlib_p8_exec` 外部程序找不到的既有环境失败，需要单独处理
+**最后更新**：2026-06-22（3.1/3.2/3.4 结构证据：`cargo test --lib bytecode` 71 passed；3.6 rest fixture：`function-rest-params=v:1|2|3:3`；2.7 分配证据仍为 tree_walk=1,000,003 allocs，bytecode_vm=15 allocs，ratio=66,666.9x）
 
 ---
 

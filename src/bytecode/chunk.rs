@@ -9,7 +9,9 @@
 
 use crate::ast::Position;
 use crate::object::Object;
+use std::rc::Rc;
 
+use super::closure::FunctionProto;
 use super::opcode::Opcode;
 
 /// A try/catch protected region. Used from stage 6 onwards; declared here so
@@ -35,6 +37,9 @@ pub struct Chunk {
     pub code: Vec<u8>,
     /// Constant pool. Referred to by `Const(u16)` etc.
     pub constants: Vec<Object>,
+    /// Function prototypes referenced by `OpClosure(u16)`. Stored separately
+    /// from `constants` because `FunctionProto` is not an `Object`.
+    pub protos: Vec<Rc<FunctionProto>>,
     /// Source position of the instruction that starts at each byte offset.
     /// Indexed by code offset; kept 1:1 with `code` for O(1) lookup. Memory is
     /// acceptable for stage 0; stage 8 may switch to run-length encoding.
@@ -113,10 +118,7 @@ impl Chunk {
 
     /// Source position of the instruction starting at `ip`.
     pub fn position_at(&self, ip: usize) -> Position {
-        self.lines
-            .get(ip)
-            .cloned()
-            .unwrap_or_default()
+        self.lines.get(ip).cloned().unwrap_or_default()
     }
 
     /// Readable disassembly, primarily for debugging and stage-0 unit tests.
@@ -138,16 +140,24 @@ impl Chunk {
                 Some(op) => {
                     // Read the operand (if any) so we advance past its bytes.
                     let operand_str = match op {
-                        Opcode::Const | Opcode::LoadName | Opcode::StoreName
-                        | Opcode::AssignName | Opcode::GetProperty | Opcode::SetProperty
-                        | Opcode::DefineMethod | Opcode::NewClass | Opcode::SuperMethod
-                        | Opcode::NewArray | Opcode::New | Opcode::Call => {
+                        Opcode::Const
+                        | Opcode::LoadName
+                        | Opcode::StoreName
+                        | Opcode::AssignName
+                        | Opcode::GetProperty
+                        | Opcode::SetProperty
+                        | Opcode::DefineMethod
+                        | Opcode::NewClass
+                        | Opcode::SuperMethod
+                        | Opcode::NewArray
+                        | Opcode::New
+                        | Opcode::Call
+                        | Opcode::Closure => {
                             let v = self.read_u16(ip);
                             ip += 2;
                             format!(" {}", v)
                         }
-                        Opcode::Jump | Opcode::JumpIfFalse | Opcode::JumpIfTrue
-                        | Opcode::Loop => {
+                        Opcode::Jump | Opcode::JumpIfFalse | Opcode::JumpIfTrue | Opcode::Loop => {
                             let v = self.read_u32(ip);
                             ip += 4;
                             format!(" ->{}", v)

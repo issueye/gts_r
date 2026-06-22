@@ -232,17 +232,26 @@ pub fn apply_unary_op(op: &str, right: &Object, pos: Position) -> Object {
         "!" => Object::Boolean(!right.is_truthy()),
         "-" => match right {
             Object::Number(n) => Object::Number(-*n),
-            _ => new_error(pos, format!("TypeError: cannot negate {}", right.type_tag())),
+            _ => new_error(
+                pos,
+                format!("TypeError: cannot negate {}", right.type_tag()),
+            ),
         },
         "+" => match right {
             Object::Number(n) => Object::Number(*n),
-            _ => new_error(pos, format!("TypeError: cannot apply + to {}", right.type_tag())),
+            _ => new_error(
+                pos,
+                format!("TypeError: cannot apply + to {}", right.type_tag()),
+            ),
         },
         "typeof" => Object::String(Rc::new(typeof_name(right))),
         "void" => Object::Undefined,
         "~" => match right {
             Object::Number(n) => Object::Number(!(*n as i32) as f64),
-            _ => new_error(pos, format!("TypeError: cannot apply ~ to {}", right.type_tag())),
+            _ => new_error(
+                pos,
+                format!("TypeError: cannot apply ~ to {}", right.type_tag()),
+            ),
         },
         _ => new_error(pos, format!("unknown prefix operator: {}", op)),
     }
@@ -784,6 +793,9 @@ pub fn apply_function(
             let mut ctx = CallContext::new(caller_env, pos);
             ctx.receiver = b.extra.clone();
             (b.func)(&mut ctx, args)
+        }
+        Object::Closure(c) => {
+            crate::bytecode::call::call_closure_object(c.clone(), caller_env, args, pos)
         }
         Object::Class(cls) => super::methods::construct_class(cls, caller_env, args, pos),
         Object::Hash(h) => {

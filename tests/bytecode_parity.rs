@@ -73,9 +73,8 @@ struct Fixture {
     expected: &'static str,
 }
 
-/// Stage 1/2 fixtures whose only dependencies are variables, operators, if,
-// while/for loops, break/continue, template literals, and println.
-fn stage_1_2_fixtures() -> Vec<Fixture> {
+/// Stage 1/2/3 fixtures whose dependencies are now covered by the bytecode VM.
+fn stage_1_3_fixtures() -> Vec<Fixture> {
     vec![
         Fixture {
             dir: "basic_expression",
@@ -105,14 +104,59 @@ fn stage_1_2_fixtures() -> Vec<Fixture> {
             dir: "while_continue",
             expected: "while-continue=18\n",
         },
+        Fixture {
+            dir: "nested_loops",
+            expected: "nested-loops=111213212223\n",
+        },
+        Fixture {
+            dir: "loop_array_build",
+            expected: "loop-array-build=0|1|4|9\n",
+        },
+        Fixture {
+            dir: "for_in_object",
+            expected: "for-in-object=abc\n",
+        },
+        Fixture {
+            dir: "for_of_array",
+            expected: "for-of-array=6:go:5:xy\n",
+        },
+        Fixture {
+            dir: "labeled_break",
+            expected: "labeled-break=1\n",
+        },
+        Fixture {
+            dir: "function_call",
+            expected: "function-call=14\n",
+        },
+        Fixture {
+            dir: "recursive_function",
+            expected: "recursive-function=120\n",
+        },
+        Fixture {
+            dir: "function_params",
+            expected: "function-params=item:undefined:key\n",
+        },
+        Fixture {
+            dir: "function_rest_params",
+            expected: "function-rest-params=v:1|2|3:3\n",
+        },
+        Fixture {
+            dir: "string_methods",
+            expected: "string-methods=ALPHA:4\n",
+        },
+        Fixture {
+            dir: "array_map_callback",
+            expected: "array-map-callback=2|4|6\n",
+        },
+        // function_closure needs upvalue capture (stage 4). It SKIPs via the
+        // compile-error path until its dependency lands.
     ]
 }
 
 #[test]
-fn bytecode_vm_matches_stage_1_2_fixtures() {
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/parity");
-    for fx in stage_1_2_fixtures() {
+fn bytecode_vm_matches_stage_1_3_fixtures() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/parity");
+    for fx in stage_1_3_fixtures() {
         // loop_array_build uses arrays which are stage 5; skip if the source
         // won't compile yet. We detect by attempting compile.
         let path = root.join(fx.dir).join("main.gs");

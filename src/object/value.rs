@@ -40,6 +40,9 @@ pub enum Object {
     Regexp(Rc<RegexpData>),
     Map(Rc<RefCell<MapData>>),
     Set(Rc<RefCell<SetData>>),
+    /// A bytecode-VM closure. Coexists with `Function` (tree-walker closures)
+    /// until the tree-walker is retired.
+    Closure(Rc<crate::bytecode::closure::ClosureData>),
 }
 
 /// Backing storage for an array value.
@@ -289,7 +292,9 @@ impl Object {
             Object::Boolean(_) => "boolean",
             Object::Null => "object",
             Object::Undefined => "undefined",
-            Object::Function(_) | Object::Builtin(_) | Object::Class(_) => "function",
+            Object::Function(_) | Object::Builtin(_) | Object::Class(_) | Object::Closure(_) => {
+                "function"
+            }
             _ => "object",
         }
     }
@@ -357,6 +362,17 @@ impl Object {
                     .collect();
                 format!("Set({})", entries.len())
             }
+            Object::Function(f) => format!("[Function: {}]", f.name),
+            Object::Builtin(b) => format!("[Function: {}]", b.name),
+            Object::Class(c) => format!("[Class: {}]", c.borrow().name),
+            Object::Closure(c) => {
+                let name = &c.proto.name;
+                if name.is_empty() {
+                    "[Function (anonymous)]".into()
+                } else {
+                    format!("[Function: {}]", name)
+                }
+            }
         }
     }
 
@@ -406,6 +422,7 @@ impl PartialEq for Object {
             (Object::Instance(a), Object::Instance(b)) => Rc::ptr_eq(a, b),
             (Object::Class(a), Object::Class(b)) => Rc::ptr_eq(a, b),
             (Object::Promise(a), Object::Promise(b)) => Rc::ptr_eq(a, b),
+            (Object::Closure(a), Object::Closure(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
