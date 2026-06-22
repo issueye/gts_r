@@ -1182,10 +1182,10 @@ fn compile_expr(expr: &Expr, chunk: &mut Chunk, resolutions: &ResolutionMap) -> 
                     compile_expr(&i.left, chunk, resolutions)?;
                     compile_or(i, chunk, resolutions)
                 }
-                "??" => Err(unsupported(
-                    i.pos.clone(),
-                    "nullish coalescing operator `??` (stage 1.2)",
-                )),
+                "??" => {
+                    compile_expr(&i.left, chunk, resolutions)?;
+                    compile_nullish_coalescing(i, chunk, resolutions)
+                }
                 _ => {
                     compile_expr(&i.left, chunk, resolutions)?;
                     compile_expr(i.right.as_ref().unwrap(), chunk, resolutions)?;
@@ -1851,6 +1851,32 @@ fn compile_or(
     Ok(())
 }
 
+/// Lower `left ?? right`: keep left unless it is null or undefined.
+/// Pre: left is already on the stack.
+fn compile_nullish_coalescing(
+    i: &crate::ast::InfixExpr,
+    chunk: &mut Chunk,
+    resolutions: &ResolutionMap,
+) -> Result<(), Object> {
+    let pos = i.pos.clone();
+    //   <left>                       ; stack: [L]
+    //   null/undefined checks        ; stack: [L]
+    //   JUMP end                     ; stack: [L] (non-nullish: keep)
+    //   nullish: POP                 ; stack: []
+    //   <right>                      ; stack: [R]
+    //   end:
+    let nullish_jumps = emit_nullish_jump_checks(chunk, pos.clone());
+    let to_end = emit_jump_placeholder(chunk, Opcode::Jump, pos.clone());
+    let nullish_ip = chunk.code.len() as u32;
+    for jump in nullish_jumps {
+        patch_jump_to(chunk, jump, nullish_ip);
+    }
+    chunk.write_op(Opcode::Pop, pos.clone());
+    compile_expr(i.right.as_ref().unwrap(), chunk, resolutions)?;
+    patch_jump_here(chunk, to_end);
+    Ok(())
+}
+
 /// Emit `<op> <placeholder u32>` and return the byte offset of the placeholder
 /// (the opcode byte position), so the caller can patch it with `patch_jump_here`.
 fn emit_jump_placeholder(chunk: &mut Chunk, op: Opcode, pos: crate::ast::Position) -> u32 {
@@ -1991,6 +2017,15 @@ mod tests {
         assert!(spine.contains(&Opcode::Dup));
         assert!(spine.contains(&Opcode::JumpIfTrue));
         assert!(spine.contains(&Opcode::GetProperty));
+    }
+
+    #[test]
+    fn compiles_nullish_coalescing_short_circuit() {
+        let chunk = compile_src("null ?? 42");
+        let spine = decode_opcode_spine(&chunk);
+        assert!(spine.contains(&Opcode::Dup));
+        assert!(spine.contains(&Opcode::JumpIfTrue));
+        assert!(spine.contains(&Opcode::Jump));
     }
 
     #[test]

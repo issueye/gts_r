@@ -92,6 +92,10 @@ fn all_parity_fixtures() -> Vec<Fixture> {
             expected: "truthy-logic=start:ok\n",
         },
         Fixture {
+            dir: "nullish_coalescing",
+            expected: "nullish-coalescing=42:7:0:false\n",
+        },
+        Fixture {
             dir: "ternary_expression",
             expected: "ternary-expression=yes:hit\n",
         },

@@ -1860,6 +1860,18 @@ mod tests {
         assert!(matches!(run_src("true || false"), Object::Boolean(true)));
     }
 
+    #[test]
+    fn nullish_coalescing_returns_right_for_null_or_undefined() {
+        assert!(matches!(run_src("null ?? 42"), Object::Number(n) if n == 42.0));
+        assert!(matches!(run_src("undefined ?? 7"), Object::Number(n) if n == 7.0));
+    }
+
+    #[test]
+    fn nullish_coalescing_keeps_non_nullish_falsy_left() {
+        assert!(matches!(run_src("0 ?? 9"), Object::Number(n) if n == 0.0));
+        assert!(matches!(run_src("false ?? true"), Object::Boolean(false)));
+    }
+
     // —— null / undefined literals (needed to exercise falsy paths) ——
     #[test]
     fn null_literal_is_falsy_in_and() {
