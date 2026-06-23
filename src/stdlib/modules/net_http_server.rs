@@ -61,7 +61,9 @@ pub(crate) fn http_create_server(ctx: &mut CallContext, args: &[Object]) -> Obje
     let mut port: Option<u16> = None;
     for arg in args {
         match arg {
-            Object::Function(_) | Object::Builtin(_) => handler = Some(arg.clone()),
+            Object::Function(_) | Object::Builtin(_) | Object::Closure(_) => {
+                handler = Some(arg.clone())
+            }
             Object::Number(n) => port = Some(*n as u16),
             _ => {}
         }
@@ -126,7 +128,9 @@ pub(crate) fn http_accept_one(
     args: &[Object],
 ) -> Object {
     let handler = match args.get(0) {
-        Some(v @ (Object::Function(_) | Object::Builtin(_))) => Some(v.clone()),
+        Some(v @ (Object::Function(_) | Object::Builtin(_) | Object::Closure(_))) => {
+            Some(v.clone())
+        }
         _ => server.handler.borrow().clone(),
     };
 

@@ -177,7 +177,12 @@ fn web_register_route(
     };
     let handlers: Vec<Object> = args[1..]
         .iter()
-        .filter(|h| matches!(h, Object::Function(_) | Object::Builtin(_)))
+        .filter(|h| {
+            matches!(
+                h,
+                Object::Function(_) | Object::Builtin(_) | Object::Closure(_)
+            )
+        })
         .cloned()
         .collect();
     if handlers.is_empty() {
@@ -207,7 +212,12 @@ fn web_use(ctx: &mut CallContext, app: &Rc<WebApp>, args: &[Object]) -> Object {
     }
     let handlers: Vec<Object> = args[start..]
         .iter()
-        .filter(|h| matches!(h, Object::Function(_) | Object::Builtin(_)))
+        .filter(|h| {
+            matches!(
+                h,
+                Object::Function(_) | Object::Builtin(_) | Object::Closure(_)
+            )
+        })
         .cloned()
         .collect();
     if handlers.is_empty() {
