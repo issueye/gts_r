@@ -385,6 +385,50 @@ app.listen(port, {{count: 1}});
 }
 
 #[test]
+fn web_async_handler_can_update_response_after_resume() {
+    let dir = unique_temp_dir("gts-p9-web-async-response-state");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let upstream = spawn_delayed_http_upstream("upstream body", Duration::from_millis(100));
+    let script = format!(
+        r#"
+let web = require("@std/web");
+let http = require("@std/http");
+let app = web.createApp();
+app.get("/proxy", function(ctx) {{
+  return http.requestAsync({{
+    url: "{upstream}",
+    method: "GET",
+    timeoutMs: 3000
+  }}).then(function(resp) {{
+    ctx.res.status(202);
+    ctx.res.setHeader("X-Upstream-Status", resp.status);
+    ctx.res.send(resp.body);
+  }});
+}});
+let port = 18094;
+println(`GTS_PORT=${{port}}`);
+app.listen(port, {{count: 1}});
+"#
+    );
+    let (mut child, port) = spawn_server_script(&dir, &script);
+    std::thread::sleep(Duration::from_millis(100));
+    let (status, head, body) = http_round_trip(
+        "127.0.0.1",
+        port,
+        "GET /proxy HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    assert!(status.contains("202"), "status was: {}", status);
+    assert!(
+        head.to_ascii_lowercase().contains("x-upstream-status: 200"),
+        "head: {}",
+        head
+    );
+    assert_eq!(body, "upstream body");
+    let _ = child.wait();
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 #[ignore = "requires async single-worker web runtime"]
 fn web_single_worker_does_not_block_fast_route_while_slow_route_waits() {
     let dir = unique_temp_dir("gts-p9-web-single-worker-async");

@@ -63,8 +63,8 @@
 
 - [x] T4.1 `@std/web` 支持 handler 返回 Promise
   - 证据：`src/stdlib/modules/web.rs` 在 handler 返回 Promise 时等待 VM completion drain 并在 reject 时返回 500；`tests/stdlib_p9_web.rs` 新增 `web_handler_returned_promise_delays_response_until_settled`，handler 直接返回 pending `http.requestAsync` Promise，本地 delayed upstream 未完成前不会发送响应；验证：`cargo fmt --check`、`cargo test --release --test stdlib_p9_web web_handler_returned_promise_delays_response_until_settled -- --nocapture` 通过。
-- [ ] T4.2 response state 可挂起
-  - 证据：`res.send/json/status/setHeader` 能在 async handler 恢复后完成响应。
+- [x] T4.2 response state 可挂起
+  - 证据：`src/evaluator/builtins.rs` 的 `Promise.then/catch/finally` 在等待 pending Promise 前触发 VM completion drain；`tests/stdlib_p9_web.rs` 新增 `web_async_handler_can_update_response_after_resume`，验证 async handler 恢复后 `ctx.res.status`、`ctx.res.setHeader`、`ctx.res.send` 能影响最终响应；验证：`cargo fmt --check`、`cargo test --release --test stdlib_p9_web web_async_handler_can_update_response_after_resume -- --nocapture`、`cargo test --release --test stdlib_p9_web web_handler_returned_promise_delays_response_until_settled -- --nocapture` 通过。
 - [ ] T4.3 单 worker accept loop 不等待上游 I/O
   - 证据：慢请求处理中，第二个请求可立即完成。
 - [ ] T4.4 收敛 handler 签名
@@ -92,4 +92,4 @@
 
 ## 当前指针
 
-T4.2 response state 可挂起。
+T4.3 单 worker accept loop 不等待上游 I/O。

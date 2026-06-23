@@ -2324,7 +2324,7 @@ fn prom_then(ctx: &mut CallContext, args: &[Object]) -> Object {
     let on_fulfilled = args.first().cloned();
     let next = Promise::new();
     // Single-threaded: wait for the source inline, then run the continuation.
-    let result = p.wait();
+    let result = wait_promise_with_vm(ctx, &p);
     if p.state() == PromiseState::Rejected {
         next.reject(result);
         return Object::Promise(next);
@@ -2334,7 +2334,7 @@ fn prom_then(ctx: &mut CallContext, args: &[Object]) -> Object {
             let r = apply_function(&f, ctx.env, &[result], None, ctx.pos.clone());
             match r {
                 Object::Promise(np) => {
-                    let nr = np.wait();
+                    let nr = wait_promise_with_vm(ctx, &np);
                     if np.state() == PromiseState::Rejected {
                         next.reject(nr);
                     } else {
@@ -2355,7 +2355,7 @@ fn prom_catch(ctx: &mut CallContext, args: &[Object]) -> Object {
     };
     let on_reject = args.first().cloned();
     let next = Promise::new();
-    let result = p.wait();
+    let result = wait_promise_with_vm(ctx, &p);
     if p.state() == PromiseState::Fulfilled {
         next.resolve(result);
         return Object::Promise(next);
@@ -2377,7 +2377,7 @@ fn prom_finally(ctx: &mut CallContext, args: &[Object]) -> Object {
     };
     let on_finally = args.first().cloned();
     let next = Promise::new();
-    let result = p.wait();
+    let result = wait_promise_with_vm(ctx, &p);
     let state = p.state();
 
     // Execute the finally handler if provided
@@ -2393,6 +2393,13 @@ fn prom_finally(ctx: &mut CallContext, args: &[Object]) -> Object {
     }
 
     Object::Promise(next)
+}
+
+fn wait_promise_with_vm(ctx: &CallContext, promise: &Rc<Promise>) -> Object {
+    if promise.state() == PromiseState::Pending {
+        ctx.vm().wait_async();
+    }
+    promise.wait()
 }
 
 // Map methods
