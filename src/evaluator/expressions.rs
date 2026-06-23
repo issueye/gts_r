@@ -1007,6 +1007,9 @@ fn eval_await(a: &AwaitExpr, env: &EnvRef) -> Object {
     let val = eval_expr(&a.value, env);
     match &val {
         Object::Promise(p) => {
+            if p.state() == PromiseState::Pending {
+                env.borrow().vm.wait_async();
+            }
             let result = p.wait();
             if p.state() == PromiseState::Rejected {
                 // Surface the rejection as a runtime error.

@@ -67,7 +67,9 @@ pub fn load_native_module(spec: &str) -> Option<Object> {
         "@std/retry" => Some(modules::retry::retry_module()),
         "@std/stream" => Some(modules::stream::stream_module()),
         "@std/exec" => Some(modules::exec::exec_module()),
-        "@std/net/http/client" => Some(modules::net_http_client::http_client_module()),
+        "@std/http" | "@std/net/http/client" => {
+            Some(modules::net_http_client::http_client_module())
+        }
         "@std/rate-limit" => Some(modules::rate_limit::rate_limit_module()),
         "@std/prometheus" => Some(modules::prometheus::prometheus_module()),
         "@std/highlight" => Some(modules::highlight::highlight_module()),

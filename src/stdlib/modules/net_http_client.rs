@@ -26,8 +26,8 @@ use super::stream::stream_from_text_object;
 use crate::ast::Position;
 #[allow(unused_imports)]
 use crate::object::{
-    bool_obj, format_number, new_error, num_obj, str_obj, strict_equal, ArrayData, Builtin,
-    CallContext, HashData, Object,
+    bool_obj, format_number, new_error, num_obj, str_obj, strict_equal, ArrayData,
+    AsyncCompletionData, AsyncHttpResponse, Builtin, CallContext, HashData, Object, Promise,
 };
 #[allow(unused_imports)]
 use crate::VERSION;
@@ -37,9 +37,22 @@ pub(crate) fn http_client_module() -> Object {
         ("get", native("http.get", http_client_get)),
         ("post", native("http.post", http_client_post)),
         ("request", native("http.request", http_client_request)),
+        (
+            "requestAsync",
+            native("http.requestAsync", http_client_request_async),
+        ),
         ("stream", native("http.stream", http_client_stream)),
         ("fetch", native("http.fetch", http_client_request)),
     ])
+}
+
+#[derive(Debug, Clone)]
+struct OwnedHttpRequest {
+    url: String,
+    method: String,
+    body: Option<String>,
+    headers: Vec<(String, String)>,
+    timeout_ms: Option<u64>,
 }
 
 pub(crate) fn http_client_get(ctx: &mut CallContext, args: &[Object]) -> Object {
@@ -120,6 +133,43 @@ pub(crate) fn http_client_post(ctx: &mut CallContext, args: &[Object]) -> Object
 }
 
 pub(crate) fn http_client_request(ctx: &mut CallContext, args: &[Object]) -> Object {
+    let request = match owned_http_request_from_args(ctx, "http.request", args) {
+        Ok(request) => request,
+        Err(err) => return err,
+    };
+
+    match perform_owned_http_request(request) {
+        Ok(response) => async_http_response_to_object(response),
+        Err(e) => new_error(ctx.pos.clone(), format!("http.request: {}", e)),
+    }
+}
+
+pub(crate) fn http_client_request_async(ctx: &mut CallContext, args: &[Object]) -> Object {
+    let request = match owned_http_request_from_args(ctx, "http.requestAsync", args) {
+        Ok(request) => request,
+        Err(err) => {
+            let promise = Promise::new();
+            promise.reject(err);
+            return Object::Promise(promise);
+        }
+    };
+
+    let vm = ctx.vm();
+    let (id, promise) = vm.create_async_completion_promise();
+    let sender = vm.async_completion_sender();
+    std::thread::spawn(move || match perform_owned_http_request(request) {
+        Ok(response) => sender.resolve(id, AsyncCompletionData::HttpResponse(response)),
+        Err(e) => sender.reject(id, format!("http.requestAsync: {}", e)),
+    });
+
+    Object::Promise(promise)
+}
+
+fn owned_http_request_from_args(
+    ctx: &mut CallContext,
+    name: &str,
+    args: &[Object],
+) -> Result<OwnedHttpRequest, Object> {
     let opts = match args.first() {
         Some(Object::Hash(h)) => h.clone(),
         Some(Object::String(url)) => {
@@ -130,16 +180,21 @@ pub(crate) fn http_client_request(ctx: &mut CallContext, args: &[Object]) -> Obj
             hash
         }
         _ => {
-            return new_error(
+            return Err(new_error(
                 ctx.pos.clone(),
-                "http.request: requires an options object or URL string",
-            )
+                format!("{name}: requires an options object or URL string"),
+            ))
         }
     };
 
     let url = match opts.borrow().get("url") {
         Some(Object::String(s)) => s.to_string(),
-        _ => return new_error(ctx.pos.clone(), "http.request: url is required"),
+        _ => {
+            return Err(new_error(
+                ctx.pos.clone(),
+                format!("{name}: url is required"),
+            ))
+        }
     };
 
     let method = match opts.borrow().get("method") {
@@ -152,28 +207,99 @@ pub(crate) fn http_client_request(ctx: &mut CallContext, args: &[Object]) -> Obj
         .get("body")
         .map(|obj| http_body_to_string(&obj));
 
-    let mut req = ureq::request(&method, &url);
+    let timeout_ms = match opts.borrow().get("timeoutMs") {
+        Some(Object::Number(ms)) if *ms > 0.0 => Some(*ms as u64),
+        _ => None,
+    };
 
-    // Apply headers
-    if let Some(Object::Hash(headers)) = opts.borrow().get("headers") {
-        let headers_data = headers.borrow();
+    let mut request_headers = Vec::new();
+    if let Some(Object::Hash(headers_obj)) = opts.borrow().get("headers") {
+        let headers_data = headers_obj.borrow();
         for (key, value) in &headers_data.entries {
-            let v = value_to_string(&value);
-            req = req.set(key, &v);
+            request_headers.push((key.clone(), value_to_string(value)));
         }
     }
 
-    let result = if let Some(body_str) = body {
+    Ok(OwnedHttpRequest {
+        url,
+        method,
+        body,
+        headers: request_headers,
+        timeout_ms,
+    })
+}
+
+fn perform_owned_http_request(request: OwnedHttpRequest) -> Result<AsyncHttpResponse, String> {
+    let mut req = ureq::request(&request.method, &request.url);
+    for (key, value) in request.headers {
+        req = req.set(&key, &value);
+    }
+    if let Some(timeout_ms) = request.timeout_ms {
+        req = req.timeout(std::time::Duration::from_millis(timeout_ms));
+    }
+
+    let result = if let Some(body_str) = request.body {
         req.send_string(&body_str)
     } else {
         req.call()
     };
 
     match result {
-        Ok(response) => build_http_response(response),
-        Err(ureq::Error::Status(code, response)) => build_http_response_with_status(response, code),
-        Err(e) => new_error(ctx.pos.clone(), format!("http.request: {}", e)),
+        Ok(response) => Ok(async_http_response_from_ureq(response, None)),
+        Err(ureq::Error::Status(code, response)) => {
+            Ok(async_http_response_from_ureq(response, Some(code)))
+        }
+        Err(e) => Err(e.to_string()),
     }
+}
+
+fn async_http_response_from_ureq(
+    response: ureq::Response,
+    status_override: Option<u16>,
+) -> AsyncHttpResponse {
+    let status = status_override.unwrap_or_else(|| response.status());
+    let status_text = response.status_text().to_string();
+    let headers = response
+        .headers_names()
+        .into_iter()
+        .filter_map(|name| {
+            response
+                .header(&name)
+                .map(|value| (name, value.to_string()))
+        })
+        .collect();
+    let body = match response.into_string() {
+        Ok(s) => s.into_bytes(),
+        Err(_) => Vec::new(),
+    };
+
+    AsyncHttpResponse {
+        status,
+        status_text,
+        headers,
+        body,
+    }
+}
+
+fn async_http_response_to_object(response: AsyncHttpResponse) -> Object {
+    let headers = Rc::new(RefCell::new(HashData::default()));
+    for (name, value) in response.headers {
+        headers.borrow_mut().set(name, str_obj(value));
+    }
+    let body = String::from_utf8_lossy(&response.body).into_owned();
+    let hash = Rc::new(RefCell::new(HashData::default()));
+    hash.borrow_mut()
+        .set("status", num_obj(response.status as f64));
+    hash.borrow_mut()
+        .set("statusText", str_obj(response.status_text));
+    hash.borrow_mut().set("headers", Object::Hash(headers));
+    hash.borrow_mut().set("body", str_obj(body));
+    hash.borrow_mut().set(
+        "ok",
+        bool_obj(response.status >= 200 && response.status < 300),
+    );
+
+    Object::Hash(hash)
 }
 
 pub(crate) fn http_client_stream(ctx: &mut CallContext, args: &[Object]) -> Object {

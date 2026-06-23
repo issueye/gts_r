@@ -226,7 +226,7 @@ impl<'a> VmState<'a> {
                     .stack
                     .pop()
                     .ok_or_else(|| self.stack_underflow(pos.clone()))?;
-                let awaited = await_value(value, pos)?;
+                let awaited = await_value(value, &self.env, pos)?;
                 self.stack.push(awaited);
             }
             Opcode::ImportModule => {
@@ -1262,9 +1262,12 @@ fn is_function_like(value: &Object) -> bool {
     )
 }
 
-fn await_value(value: Object, pos: Position) -> Result<Object, Object> {
+fn await_value(value: Object, env: &EnvRef, pos: Position) -> Result<Object, Object> {
     match &value {
         Object::Promise(promise) => {
+            if promise.state() == PromiseState::Pending {
+                env.borrow().vm.wait_async();
+            }
             let result = promise.wait();
             if promise.state() == PromiseState::Rejected {
                 return Err(match &result {
