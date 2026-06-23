@@ -25,6 +25,18 @@ use crate::stdlib::load_native_module;
 /// Result of running a script.
 pub type RuntimeResult<T> = Result<T, Object>;
 
+/// Human-readable runtime mode exposed by the CLI and `@std/runtime`.
+#[cfg(feature = "tokio")]
+pub fn runtime_mode() -> &'static str {
+    "bytecode + tokio-io"
+}
+
+/// Human-readable runtime mode exposed by the CLI and `@std/runtime`.
+#[cfg(not(feature = "tokio"))]
+pub fn runtime_mode() -> &'static str {
+    "bytecode + native-io"
+}
+
 /// Options for running a script file.
 #[derive(Debug, Clone, Default)]
 pub struct RunOptions {
@@ -61,37 +73,17 @@ impl Session {
             module_cache,
             resolver,
             #[cfg(feature = "tokio")]
-            tokio_runtime: None,
+            tokio_runtime: Some(crate::async_runtime::tokio_rt::TokioRuntime::new()),
         };
         session.install_host_globals();
         session.install_importer();
         session
     }
 
-    /// Create a session with tokio runtime enabled (requires `tokio` feature)
-    ///
-    /// This enables multi-threaded async execution for I/O-bound workloads.
+    /// Compatibility alias for the default Tokio-capable session constructor.
     #[cfg(feature = "tokio")]
     pub fn with_tokio() -> Session {
-        let vm = VirtualMachine::new();
-        vm.exec_mode.store(EXEC_MODE_BYTECODE, Ordering::Relaxed);
-        register_globals(&vm);
-        vm.set_evaluator(Rc::new(eval_node));
-
-        let root = Environment::new_root(vm.clone());
-        let module_cache = Rc::new(new_module_cache());
-        let resolver = Rc::new(Resolver::new(None));
-
-        let session = Session {
-            vm,
-            root,
-            module_cache,
-            resolver,
-            tokio_runtime: Some(crate::async_runtime::tokio_rt::TokioRuntime::new()),
-        };
-        session.install_host_globals();
-        session.install_importer();
-        session
+        Session::new()
     }
 
     /// Check if tokio runtime is enabled

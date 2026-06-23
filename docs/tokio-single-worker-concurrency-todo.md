@@ -28,12 +28,12 @@
 
 ## 阶段 1：Runtime 入口统一到 Tokio I/O
 
-- [ ] T1.1 默认构建启用 Tokio 能力
-  - 证据：`Cargo.toml` 默认 feature 或依赖策略调整；`cargo test --release` 通过。
-- [ ] T1.2 `Session::new()` 具备 Tokio I/O runtime
-  - 证据：`Session::new()` 不再创建无 Tokio 的运行时；`Session::with_tokio()` 收敛为兼容别名或删除。
-- [ ] T1.3 CLI/runtime state 暴露运行模式
-  - 证据：`gs -v` 或 `@std/runtime` 能显示 `bytecode + tokio-io`。
+- [x] T1.1 默认构建启用 Tokio 能力
+  - 证据：`Cargo.toml` 默认 feature 调整为 `["tokio"]`；`cargo test --release --test stdlib_p9_runtime` 通过。
+- [x] T1.2 `Session::new()` 具备 Tokio I/O runtime
+  - 证据：`src/runtime/mod.rs` 中 `Session::new()` 默认创建 `TokioRuntime`；`Session::with_tokio()` 收敛为 `Session::new()` 别名。
+- [x] T1.3 CLI/runtime state 暴露运行模式
+  - 证据：`src/bin/gs.rs` 的 `gs -v` 输出 `bytecode + tokio-io`；`src/stdlib/modules/runtime.rs` 暴露 `@std/runtime.mode` 和 `runtime.state()`。
 - [ ] T1.4 删除或收敛 native/tokio 双公开入口
   - 证据：公开 API 只保留一个 runtime facade。
 
@@ -92,4 +92,4 @@
 
 ## 当前指针
 
-T1.1 默认构建启用 Tokio 能力。
+T1.4 删除或收敛 native/tokio 双公开入口。

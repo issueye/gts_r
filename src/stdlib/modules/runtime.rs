@@ -41,12 +41,30 @@ struct RuntimeOpts {
 
 pub(crate) fn runtime_module() -> Object {
     module(vec![
+        ("mode", str_obj(crate::runtime::runtime_mode())),
+        ("state", native("runtime.state", runtime_state)),
         ("runScript", native("runtime.runScript", runtime_run_script)),
         (
             "callScript",
             native("runtime.callScript", runtime_call_script),
         ),
         ("runTool", native("runtime.runTool", runtime_run_tool)),
+    ])
+}
+
+pub(crate) fn runtime_state(_ctx: &mut CallContext, _args: &[Object]) -> Object {
+    module(vec![
+        ("mode", str_obj(crate::runtime::runtime_mode())),
+        ("execMode", str_obj("bytecode")),
+        (
+            "io",
+            str_obj(if cfg!(feature = "tokio") {
+                "tokio-io"
+            } else {
+                "native-io"
+            }),
+        ),
+        ("tokio", bool_obj(cfg!(feature = "tokio"))),
     ])
 }
 

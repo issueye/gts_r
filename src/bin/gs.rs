@@ -23,7 +23,7 @@ fn main() {
 
     match parse_cli(cli_args) {
         Ok(Command::Help) => print_help(&program),
-        Ok(Command::Version) => println!("GoScript {}", VERSION),
+        Ok(Command::Version) => println!("GoScript {} ({})", VERSION, gts::runtime::runtime_mode()),
         Ok(Command::Repl) => run_repl(),
         Ok(Command::Init { dir }) => init_project(dir),
         Ok(Command::Run {
