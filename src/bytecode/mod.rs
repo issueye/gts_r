@@ -8,7 +8,6 @@
 //! Stage 0 scope: `1 + 2` → `3.0`. Every other AST node is a deliberate
 //! compile error; see the stage plan for the coverage roadmap.
 
-pub mod awaitable;
 pub mod call;
 pub mod chunk;
 pub mod class;
