@@ -276,6 +276,22 @@ fn owned_http_request_from_args(
 }
 
 fn perform_owned_http_request(request: OwnedHttpRequest) -> Result<AsyncHttpResponse, String> {
+    #[cfg(feature = "tokio")]
+    {
+        let state = http_client_state();
+        let client = state.client.clone();
+        return state
+            .runtime
+            .block_on(perform_owned_http_request_tokio(client, request));
+    }
+    #[cfg(not(feature = "tokio"))]
+    {
+        return perform_owned_http_request_ureq(request);
+    }
+}
+
+#[cfg(not(feature = "tokio"))]
+fn perform_owned_http_request_ureq(request: OwnedHttpRequest) -> Result<AsyncHttpResponse, String> {
     let mut req = ureq::request(&request.method, &request.url);
     for (key, value) in request.headers {
         req = req.set(&key, &value);

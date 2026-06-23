@@ -269,3 +269,49 @@ fn http_client_request_async_reuses_keepalive_connection() {
     server.join().expect("keepalive server");
     assert!(String::from_utf8_lossy(&out.stdout).contains("pooled async test passed"));
 }
+
+#[test]
+fn http_client_request_uses_pooled_tokio_client() {
+    let dir = unique_temp_dir("http_request_pool");
+    fs::create_dir_all(&dir).unwrap();
+    let request_count = 16;
+    let (url, server) = spawn_keepalive_http_server(request_count);
+    let expected = (0..request_count)
+        .map(|i| format!("pooled-{i}"))
+        .collect::<Vec<_>>()
+        .join("|");
+    let script = format!(
+        r#"
+        const http = require("@std/http");
+        let bodies = "";
+        for (let i = 0; i < {request_count}; i = i + 1) {{
+            const resp = http.request({{
+                url: "{url}",
+                method: "GET",
+                timeoutMs: 2000
+            }});
+            if (resp.status !== 200) {{
+                throw new Error("expected status 200, got " + resp.status);
+            }}
+            if (i > 0) {{
+                bodies = bodies + "|";
+            }}
+            bodies = bodies + resp.body;
+        }}
+        if (bodies !== "{expected}") {{
+            throw new Error("unexpected pooled bodies " + bodies);
+        }}
+        print("pooled sync request test passed");
+    "#
+    );
+    let out = run_script(&dir, &script);
+    fs::remove_dir_all(&dir).ok();
+    assert!(
+        out.status.success(),
+        "script failed\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    server.join().expect("keepalive server");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("pooled sync request test passed"));
+}
