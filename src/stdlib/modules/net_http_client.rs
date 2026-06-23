@@ -7,6 +7,7 @@ use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf, MAIN_SEPARATOR, MAIN_SEPARATOR_STR};
 use std::rc::Rc;
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[allow(unused_imports)]
@@ -32,6 +33,9 @@ use crate::object::{
 #[allow(unused_imports)]
 use crate::VERSION;
 
+#[cfg(feature = "tokio")]
+use reqwest::Method;
+
 pub(crate) fn http_client_module() -> Object {
     module(vec![
         ("get", native("http.get", http_client_get)),
@@ -53,6 +57,34 @@ struct OwnedHttpRequest {
     body: Option<String>,
     headers: Vec<(String, String)>,
     timeout_ms: Option<u64>,
+}
+
+#[cfg(feature = "tokio")]
+#[derive(Debug)]
+struct HttpClientState {
+    runtime: tokio::runtime::Runtime,
+    client: reqwest::Client,
+}
+
+#[cfg(feature = "tokio")]
+static HTTP_CLIENT_STATE: OnceLock<HttpClientState> = OnceLock::new();
+
+#[cfg(feature = "tokio")]
+fn http_client_state() -> &'static HttpClientState {
+    HTTP_CLIENT_STATE.get_or_init(|| HttpClientState {
+        runtime: tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .thread_name("gts-http-client")
+            .enable_all()
+            .build()
+            .expect("build http client runtime"),
+        client: reqwest::Client::builder()
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .pool_max_idle_per_host(8)
+            .tcp_keepalive(Some(std::time::Duration::from_secs(30)))
+            .build()
+            .expect("build reqwest client"),
+    })
 }
 
 pub(crate) fn http_client_get(ctx: &mut CallContext, args: &[Object]) -> Object {
@@ -157,10 +189,24 @@ pub(crate) fn http_client_request_async(ctx: &mut CallContext, args: &[Object]) 
     let vm = ctx.vm();
     let (id, promise) = vm.create_async_completion_promise();
     let sender = vm.async_completion_sender();
-    std::thread::spawn(move || match perform_owned_http_request(request) {
-        Ok(response) => sender.resolve(id, AsyncCompletionData::HttpResponse(response)),
-        Err(e) => sender.reject(id, format!("http.requestAsync: {}", e)),
-    });
+    #[cfg(feature = "tokio")]
+    {
+        let state = http_client_state();
+        let client = state.client.clone();
+        state.runtime.spawn(async move {
+            match perform_owned_http_request_tokio(client, request).await {
+                Ok(response) => sender.resolve(id, AsyncCompletionData::HttpResponse(response)),
+                Err(e) => sender.reject(id, format!("http.requestAsync: {}", e)),
+            }
+        });
+    }
+    #[cfg(not(feature = "tokio"))]
+    {
+        std::thread::spawn(move || match perform_owned_http_request(request) {
+            Ok(response) => sender.resolve(id, AsyncCompletionData::HttpResponse(response)),
+            Err(e) => sender.reject(id, format!("http.requestAsync: {}", e)),
+        });
+    }
 
     Object::Promise(promise)
 }
@@ -251,6 +297,58 @@ fn perform_owned_http_request(request: OwnedHttpRequest) -> Result<AsyncHttpResp
         }
         Err(e) => Err(e.to_string()),
     }
+}
+
+#[cfg(feature = "tokio")]
+async fn perform_owned_http_request_tokio(
+    client: reqwest::Client,
+    request: OwnedHttpRequest,
+) -> Result<AsyncHttpResponse, String> {
+    let method = Method::from_bytes(request.method.as_bytes()).map_err(|e| e.to_string())?;
+    let mut builder = client.request(method, &request.url);
+
+    for (key, value) in request.headers {
+        builder = builder.header(key, value);
+    }
+    if let Some(timeout_ms) = request.timeout_ms {
+        builder = builder.timeout(std::time::Duration::from_millis(timeout_ms));
+    }
+    if let Some(body) = request.body {
+        builder = builder.body(body);
+    }
+
+    let response = builder.send().await.map_err(|e| e.to_string())?;
+    async_http_response_from_reqwest(response).await
+}
+
+#[cfg(feature = "tokio")]
+async fn async_http_response_from_reqwest(
+    response: reqwest::Response,
+) -> Result<AsyncHttpResponse, String> {
+    let status = response.status().as_u16();
+    let status_text = response
+        .status()
+        .canonical_reason()
+        .unwrap_or("")
+        .to_string();
+    let headers = response
+        .headers()
+        .iter()
+        .map(|(name, value)| {
+            (
+                name.as_str().to_string(),
+                value.to_str().unwrap_or("").to_string(),
+            )
+        })
+        .collect();
+    let body = response.bytes().await.map_err(|e| e.to_string())?.to_vec();
+
+    Ok(AsyncHttpResponse {
+        status,
+        status_text,
+        headers,
+        body,
+    })
 }
 
 fn async_http_response_from_ureq(

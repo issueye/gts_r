@@ -19,10 +19,11 @@ path = "bench/bench_client.rs"
 
 [features]
 default = ["tokio"]
-tokio = ["dep:tokio"]
+tokio = ["dep:tokio", "dep:reqwest"]
 
 [dependencies]
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync", "io-util", "net"], optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winsock2", "ws2def", "mswsock", "ioapiset", "minwinbase", "handleapi", "winnt"] }
