@@ -11,10 +11,11 @@ use std::time::{Duration, Instant};
 use crate::ast::Position;
 use crate::async_runtime::{
     AsyncCompletion, AsyncCompletionData, AsyncCompletionId, AsyncCompletionQueue,
-    AsyncCompletionSender,
+    AsyncCompletionResult, AsyncCompletionSender, AsyncHttpResponse,
 };
 
-use super::value::{new_error, Object};
+use super::promise::Promise;
+use super::value::{bool_obj, new_error, num_obj, str_obj, ArrayData, HashData, Object};
 
 /// The evaluator callback type. Given an AST node and an environment, produce a
 /// value. Stored on the VM so runtime objects (closures, Promise continuations)
@@ -51,6 +52,7 @@ pub struct VirtualMachine {
     /// Pending async work counter; the host drains this before returning.
     async_pending: RefCell<usize>,
     async_completions: AsyncCompletionQueue,
+    async_promises: RefCell<HashMap<AsyncCompletionId, Rc<Promise>>>,
     pub bootstrap_source: RefCell<String>,
     evaluator: RefCell<Option<Rc<EvaluatorFn>>>,
     importer: RefCell<Option<Rc<ImporterFn>>>,
@@ -68,6 +70,7 @@ impl VirtualMachine {
             next_async_completion: AtomicI64::new(0),
             async_pending: RefCell::new(0),
             async_completions: AsyncCompletionQueue::new(),
+            async_promises: RefCell::new(HashMap::new()),
             bootstrap_source: RefCell::new(String::new()),
             evaluator: RefCell::new(None),
             importer: RefCell::new(None),
@@ -143,6 +146,22 @@ impl VirtualMachine {
         self.async_completions.sender()
     }
 
+    /// Allocate an async completion id, register a Promise on the VM thread,
+    /// and count it as pending async work.
+    pub fn create_async_completion_promise(&self) -> (AsyncCompletionId, Rc<Promise>) {
+        let id = self.next_async_completion_id();
+        let promise = Promise::new();
+        self.register_async_completion_promise(id, promise.clone());
+        (id, promise)
+    }
+
+    /// Register a Promise that will be settled when the matching completion is
+    /// drained on the VM thread.
+    pub fn register_async_completion_promise(&self, id: AsyncCompletionId, promise: Rc<Promise>) {
+        self.async_promises.borrow_mut().insert(id, promise);
+        self.async_add(1);
+    }
+
     /// Queue a completion from the VM thread or tests.
     pub fn enqueue_async_completion(&self, completion: AsyncCompletion) {
         self.async_completions.enqueue(completion);
@@ -160,11 +179,22 @@ impl VirtualMachine {
 
     /// Drain queued completions on the VM thread.
     ///
-    /// Promise resolution will be wired here in a later step. For now this
-    /// returns pure data completions and updates the pending counter.
+    /// Matching registered Promises are resolved/rejected here so Object work
+    /// remains on the VM thread. The returned completions are pure data for
+    /// diagnostics and low-level tests.
     pub fn drain_async_completions(&self) -> Vec<AsyncCompletion> {
         let completions = self.async_completions.drain();
-        for _ in &completions {
+        for completion in &completions {
+            if let Some(promise) = self.async_promises.borrow_mut().remove(&completion.id) {
+                match &completion.result {
+                    AsyncCompletionResult::Resolve(data) => {
+                        promise.resolve(async_completion_data_to_object(data.clone()));
+                    }
+                    AsyncCompletionResult::Reject(error) => {
+                        promise.reject(new_error(Position::default(), error.clone()));
+                    }
+                }
+            }
             self.async_done();
         }
         completions
@@ -172,6 +202,10 @@ impl VirtualMachine {
 
     pub fn async_completion_len(&self) -> usize {
         self.async_completions.len()
+    }
+
+    pub fn async_registered_promise_len(&self) -> usize {
+        self.async_promises.borrow().len()
     }
 
     /// Mark async work complete.
@@ -202,4 +236,34 @@ impl VirtualMachine {
 /// Helper to create an error positioned at the given call site.
 pub fn vm_error(pos: Position, msg: impl Into<String>) -> Object {
     new_error(pos, msg)
+}
+
+fn async_completion_data_to_object(data: AsyncCompletionData) -> Object {
+    match data {
+        AsyncCompletionData::Undefined => Object::Undefined,
+        AsyncCompletionData::Text(text) | AsyncCompletionData::JsonText(text) => str_obj(text),
+        AsyncCompletionData::Bytes(bytes) => Object::Array(Rc::new(RefCell::new(ArrayData {
+            elements: bytes.into_iter().map(|byte| num_obj(byte as f64)).collect(),
+        }))),
+        AsyncCompletionData::HttpResponse(response) => async_http_response_to_object(response),
+    }
+}
+
+fn async_http_response_to_object(response: AsyncHttpResponse) -> Object {
+    let headers = Rc::new(RefCell::new(HashData::default()));
+    for (name, value) in response.headers {
+        headers.borrow_mut().set(name, str_obj(value));
+    }
+
+    let body = String::from_utf8_lossy(&response.body).into_owned();
+    let obj = Rc::new(RefCell::new(HashData::default()));
+    obj.borrow_mut()
+        .set("status", num_obj(response.status as f64));
+    obj.borrow_mut()
+        .set("statusText", str_obj(response.status_text));
+    obj.borrow_mut().set("headers", Object::Hash(headers));
+    obj.borrow_mut().set("body", str_obj(body));
+    obj.borrow_mut()
+        .set("ok", bool_obj((200..300).contains(&response.status)));
+    Object::Hash(obj)
 }

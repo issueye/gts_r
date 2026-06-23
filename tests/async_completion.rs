@@ -1,4 +1,4 @@
-use gts::object::{AsyncCompletionData, AsyncCompletionResult, VirtualMachine};
+use gts::object::{AsyncCompletionData, AsyncCompletionResult, PromiseState, VirtualMachine};
 
 #[test]
 fn background_thread_can_enqueue_owned_completion_for_vm_drain() {
@@ -45,6 +45,36 @@ fn vm_enqueue_helpers_support_reject_and_resolve() {
         completions[1].result,
         AsyncCompletionResult::Reject("network failed".into())
     );
+}
+
+#[test]
+fn vm_drain_settles_registered_promise_on_vm_thread() {
+    let vm = VirtualMachine::new();
+    let (id, promise) = vm.create_async_completion_promise();
+
+    assert_eq!(promise.state(), PromiseState::Pending);
+    assert_eq!(vm.async_registered_promise_len(), 1);
+
+    vm.enqueue_async_resolve(id, AsyncCompletionData::Text("settled".to_string()));
+
+    let completions = vm.drain_async_completions();
+    assert_eq!(completions.len(), 1);
+    assert_eq!(vm.async_registered_promise_len(), 0);
+    assert_eq!(promise.state(), PromiseState::Fulfilled);
+    assert_eq!(promise.wait().inspect(), "settled");
+}
+
+#[test]
+fn vm_drain_rejects_registered_promise_on_vm_thread() {
+    let vm = VirtualMachine::new();
+    let (id, promise) = vm.create_async_completion_promise();
+
+    vm.enqueue_async_reject(id, "network failed");
+
+    let completions = vm.drain_async_completions();
+    assert_eq!(completions.len(), 1);
+    assert_eq!(promise.state(), PromiseState::Rejected);
+    assert!(promise.wait().inspect().contains("network failed"));
 }
 
 #[cfg(feature = "tokio")]

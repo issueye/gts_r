@@ -41,8 +41,8 @@
 
 - [x] T2.1 增加线程安全 completion 数据结构
   - 证据：新增 `src/async_runtime/completion.rs`，提供 `AsyncCompletion` / `AsyncCompletionQueue` / `AsyncCompletionSender`，跨线程只传 owned `Send` 数据。
-- [ ] T2.2 VM 线程 drain completion 并 resolve/reject Promise
-  - 证据：Promise resolve/reject 只在 VM 线程执行。
+- [x] T2.2 VM 线程 drain completion 并 resolve/reject Promise
+  - 证据：`src/object/vm.rs` 新增 `completion_id -> Promise` 登记表，`drain_async_completions()` 在 VM 线程把 owned completion 转成 `Object` 并 resolve/reject；`tests/async_completion.rs` 覆盖 resolve/reject Promise，`cargo test --release --test async_completion` 通过。
 - [x] T2.3 Tokio task 能把结果投递回 VM
   - 证据：`tests/async_completion.rs` 覆盖后台线程与 Tokio task 投递 completion，`cargo test --release --test async_completion` 通过。
 - [ ] T2.4 `wait_async` 改为事件循环式 drain
@@ -92,4 +92,4 @@
 
 ## 当前指针
 
-T1.4 已完成；下一步推进 T2.2 Promise resolve/reject 绑定。
+T2.4 `wait_async` 改为事件循环式 drain。
