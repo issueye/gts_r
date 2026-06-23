@@ -35,7 +35,6 @@
 /// - **Backward compatible**: Existing code works unchanged
 /// - **Opt-in parallelism**: Users choose runtime via feature flag
 pub mod completion;
-pub mod native;
 
 #[cfg(feature = "tokio")]
 pub mod tokio_rt;
@@ -45,7 +44,6 @@ pub use completion::{
     AsyncCompletion, AsyncCompletionData, AsyncCompletionId, AsyncCompletionQueue,
     AsyncCompletionResult, AsyncCompletionSender, AsyncHttpResponse,
 };
-pub use native::NativeRuntime;
 
 #[cfg(feature = "tokio")]
 pub use tokio_rt::TokioRuntime;
