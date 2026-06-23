@@ -14,7 +14,7 @@ A fully feature-gated tokio integration that provides optional multi-threaded as
 
 1. ✅ **Feature-gated compilation** - `tokio` feature adds ~2MB, native build unchanged
 2. ✅ **Multi-threaded execution** - Configurable worker threads, true parallelism
-3. ✅ **Session integration** - `Session::with_tokio()` for easy opt-in
+3. ✅ **Session integration** - `Session::new()` includes Tokio when the feature is enabled
 4. ✅ **Async TCP operations** - Non-blocking I/O via tokio primitives
 5. ✅ **Comprehensive testing** - 23 tests pass (19 native + 4 tokio)
 6. ✅ **Complete documentation** - 3 design docs, API docs, examples
@@ -64,7 +64,7 @@ A fully feature-gated tokio integration that provides optional multi-threaded as
 
 2. **`src/runtime/mod.rs`**
    - Added `tokio_runtime` field to Session
-   - Added `Session::with_tokio()` constructor
+   - `Session::new()` creates a Tokio runtime when the feature is enabled
    - Added accessor methods
 
 3. **`src/async_runtime/mod.rs`**
@@ -93,7 +93,7 @@ tokio = {
 ```rust
 // Create tokio-enabled session
 #[cfg(feature = "tokio")]
-let session = Session::with_tokio();
+let session = Session::new();
 
 // Check availability
 #[cfg(feature = "tokio")]
@@ -189,7 +189,7 @@ cargo build --features tokio
 
 - All existing code works unchanged
 - `Session::new()` remains default
-- `Session::with_tokio()` is opt-in
+- `Session::new()` is the single public session constructor
 
 ### 4. One Library Per Module (一个原生库一个单元)
 
@@ -342,7 +342,7 @@ The tokio integration is **production-ready** and provides:
 
 ✅ **Zero overhead** for default build  
 ✅ **Optional parallelism** via feature flag  
-✅ **Clean API** with `Session::with_tokio()`  
+✅ **Clean API** with `Session::new()`  
 ✅ **Comprehensive testing** (23 tests pass)  
 ✅ **Complete documentation** (4 design docs)  
 ✅ **Performance verified** (8.5x speedup for I/O)  

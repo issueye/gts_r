@@ -17,15 +17,15 @@ cargo build --bin gs --features tokio
 
 ## Basic Usage
 
-### Creating a Tokio-Enabled Session
+### Creating a Session
 
 ```rust
 use gts::runtime::Session;
 
 #[cfg(feature = "tokio")]
 fn main() {
-    // Create session with tokio runtime
-    let session = Session::with_tokio();
+    // The default session includes the tokio runtime when the feature is enabled.
+    let session = Session::new();
     
     // Check if tokio is available
     assert!(session.has_tokio());
@@ -43,7 +43,6 @@ fn main() {
 
 #[cfg(not(feature = "tokio"))]
 fn main() {
-    // Fallback to native runtime
     let session = Session::new();
     
     let result = session.run_source(
@@ -166,7 +165,7 @@ fn benchmark_concurrent_io() {
     
     #[cfg(feature = "tokio")]
     {
-        let session = Session::with_tokio();
+        let session = Session::new();
         let runtime = session.tokio_runtime().unwrap();
         
         // Simulate 100 concurrent I/O operations

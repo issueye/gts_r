@@ -69,7 +69,7 @@ VM event loop
 ### 阶段 1：运行时入口统一到 Tokio 能力
 
 - 将 release 构建默认启用 `tokio` feature，或移除 feature gate，直接把 Tokio 作为默认 runtime 依赖。
-- `Session::new()` 直接具备 Tokio I/O 能力；如果保留 `Session::with_tokio()`，也只作为内部构造细节。
+- `Session::new()` 直接具备 Tokio I/O 能力；不再保留 `Session::with_tokio()` 公开构造入口。
 - CLI 增加可观测输出：运行模式显示 `bytecode + tokio-io`。
 - 删除或收敛“native async runtime”与“tokio async runtime”的重复公开入口，保留一个 runtime façade。
 
@@ -177,4 +177,3 @@ VM event loop
 - `@std/http` 默认异步、连接池化。
 - 同步 API 若保留，只作为异步 API 的薄包装，不再维护独立实现。
 - `gs-llm-bridge` 默认单 worker 即可承载并发代理；多 worker 只用于 CPU 密集或隔离需求。
-

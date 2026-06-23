@@ -80,12 +80,6 @@ impl Session {
         session
     }
 
-    /// Compatibility alias for the default Tokio-capable session constructor.
-    #[cfg(feature = "tokio")]
-    pub fn with_tokio() -> Session {
-        Session::new()
-    }
-
     /// Check if tokio runtime is enabled
     #[cfg(feature = "tokio")]
     pub fn has_tokio(&self) -> bool {

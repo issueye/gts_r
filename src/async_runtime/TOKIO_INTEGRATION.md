@@ -134,7 +134,7 @@ pub struct VirtualMachine {
 }
 
 impl VirtualMachine {
-    pub fn with_tokio() -> Rc<Self> {
+    pub fn new() -> Rc<Self> {
         // Create VM with tokio runtime
     }
     
@@ -219,7 +219,7 @@ let session = Session::new();
 
 // Opt-in: tokio runtime
 #[cfg(feature = "tokio")]
-let session = Session::with_tokio();
+let session = Session::new();
 ```
 
 ### Step 4: Feature-gate stdlib I/O

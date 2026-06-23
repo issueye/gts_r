@@ -20,8 +20,8 @@ fn main() {
     // Demo 2: Concurrent tasks
     demo_concurrent_tasks();
 
-    // Demo 3: Session with tokio
-    demo_session_with_tokio();
+    // Demo 3: default Session with tokio
+    demo_session();
 
     println!("\n=== Demo Complete ===");
 }
@@ -82,11 +82,11 @@ fn demo_concurrent_tasks() {
 }
 
 #[cfg(feature = "tokio")]
-fn demo_session_with_tokio() {
+fn demo_session() {
     println!("Demo 3: GTS Session with Tokio");
     println!("-------------------------------");
 
-    let session = Session::with_tokio();
+    let session = Session::new();
 
     println!("Tokio enabled: {}", session.has_tokio());
 

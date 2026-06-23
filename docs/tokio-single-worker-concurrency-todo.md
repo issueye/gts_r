@@ -31,11 +31,11 @@
 - [x] T1.1 默认构建启用 Tokio 能力
   - 证据：`Cargo.toml` 默认 feature 调整为 `["tokio"]`；`cargo test --release --test stdlib_p9_runtime` 通过。
 - [x] T1.2 `Session::new()` 具备 Tokio I/O runtime
-  - 证据：`src/runtime/mod.rs` 中 `Session::new()` 默认创建 `TokioRuntime`；`Session::with_tokio()` 收敛为 `Session::new()` 别名。
+  - 证据：`src/runtime/mod.rs` 中 `Session::new()` 默认创建 `TokioRuntime`。
 - [x] T1.3 CLI/runtime state 暴露运行模式
   - 证据：`src/bin/gs.rs` 的 `gs -v` 输出 `bytecode + tokio-io`；`src/stdlib/modules/runtime.rs` 暴露 `@std/runtime.mode` 和 `runtime.state()`。
-- [ ] T1.4 删除或收敛 native/tokio 双公开入口
-  - 证据：公开 API 只保留一个 runtime facade。
+- [x] T1.4 删除或收敛 native/tokio 双公开入口
+  - 证据：删除 `src/runtime/mod.rs` 的 `Session::with_tokio()` 公开构造入口；`examples/tokio_demo.rs` 与 Tokio 示例文档统一使用 `Session::new()`；验证：`rustfmt --check src/runtime/mod.rs examples/tokio_demo.rs src/async_runtime/awaitable_bridge.rs`、`cargo test --lib runtime --features tokio`、`cargo test --example tokio_demo --features tokio`、`cargo test --test bytecode_default --features tokio` 通过。
 
 ## 阶段 2：Async Completion Queue
 
@@ -92,4 +92,4 @@
 
 ## 当前指针
 
-T1.4 删除或收敛 native/tokio 双公开入口；下一步同时推进 T2.2 Promise resolve/reject 绑定。
+T1.4 已完成；下一步推进 T2.2 Promise resolve/reject 绑定。

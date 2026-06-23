@@ -119,7 +119,7 @@
   - 4 个集成测试
 
 **Session 集成**:
-- `Session::with_tokio()` 构造函数
+- `Session::new()` 默认构造函数
 - `has_tokio()` 检查
 - `tokio_runtime()` 访问器
 

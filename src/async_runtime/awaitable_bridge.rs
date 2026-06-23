@@ -151,7 +151,7 @@ pub mod docs {
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let session = Session::with_tokio();
+    ///     let session = Session::new();
     ///     
     ///     // Run GTS script on blocking thread pool
     ///     let result = tokio::task::spawn_blocking(move || {
@@ -161,7 +161,7 @@ pub mod docs {
     ///     println!("Result: {:?}", result);
     /// }
     /// ```
-    pub fn example_session_with_tokio() {}
+    pub fn example_session() {}
 
     /// Example: Mixing tokio I/O with GTS
     ///

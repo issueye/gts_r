@@ -34,7 +34,6 @@ Stage 5 successfully integrates tokio into the GTS runtime, providing optional m
 
 2. **`src/runtime/mod.rs`**
    - Added optional `tokio_runtime` field to `Session`
-   - Added `Session::with_tokio()` constructor
    - Added `has_tokio()` and `tokio_runtime()` accessors
 
 3. **`src/async_runtime/mod.rs`**
@@ -72,14 +71,14 @@ let handles: Vec<_> = (0..100).map(|i| {
 
 ```rust
 #[cfg(feature = "tokio")]
-let session = Session::with_tokio();
+let session = Session::new();
 
 assert!(session.has_tokio());
 
 session.run_source("console.log('Hello from tokio!')", "script.gs");
 ```
 
-- Drop-in replacement for `Session::new()`
+- Tokio runtime is attached to `Session::new()` when the feature is enabled
 - Transparent tokio integration
 - GTS scripts run unchanged
 
@@ -209,7 +208,7 @@ Script executed successfully: 30
 
 ```rust
 #[cfg(feature = "tokio")]
-let session = Session::with_tokio();
+let session = Session::new();
 
 #[cfg(not(feature = "tokio"))]
 let session = Session::new();
@@ -218,14 +217,7 @@ let session = Session::new();
 ### Pattern 2: Runtime Selection
 
 ```rust
-let session = if use_tokio {
-    #[cfg(feature = "tokio")]
-    { Session::with_tokio() }
-    #[cfg(not(feature = "tokio"))]
-    { Session::new() }
-} else {
-    Session::new()
-};
+let session = Session::new();
 ```
 
 ### Pattern 3: Async I/O
