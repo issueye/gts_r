@@ -1270,6 +1270,7 @@ pub fn array_method(name: &str) -> Option<BuiltinFn> {
         "indexOf" => Some(arr_index_of),
         "join" => Some(arr_join),
         "slice" => Some(arr_slice),
+        "splice" => Some(arr_splice),
         "concat" => Some(arr_concat),
         "reverse" => Some(arr_reverse),
         "sort" => Some(arr_sort),
@@ -1647,6 +1648,31 @@ fn arr_slice(ctx: &mut CallContext, args: &[Object]) -> Object {
         return Object::Array(Rc::new(RefCell::new(ArrayData { elements: slice })));
     }
     Object::Array(Rc::new(RefCell::new(ArrayData::default())))
+}
+fn arr_splice(ctx: &mut CallContext, args: &[Object]) -> Object {
+    let Some(a) = active_array(ctx) else {
+        return Object::Array(Rc::new(RefCell::new(ArrayData::default())));
+    };
+    let mut arr = a.borrow_mut();
+    let len = arr.elements.len() as isize;
+    let start = normalize_index(as_num(args.get(0)) as isize, len)
+        .max(0)
+        .min(len) as usize;
+    let delete_count = if args.is_empty() {
+        0
+    } else {
+        match args.get(1) {
+            Some(Object::Number(n)) => (*n as isize).max(0).min(len - start as isize) as usize,
+            Some(_) => 0,
+            None => (len as usize).saturating_sub(start),
+        }
+    };
+    let items: Vec<Object> = args.iter().skip(2).cloned().collect();
+    let removed: Vec<Object> = arr
+        .elements
+        .splice(start..start + delete_count, items)
+        .collect();
+    Object::Array(Rc::new(RefCell::new(ArrayData { elements: removed })))
 }
 fn arr_concat(ctx: &mut CallContext, args: &[Object]) -> Object {
     let mut out = match active_array(ctx) {

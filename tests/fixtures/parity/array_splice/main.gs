@@ -1,0 +1,10 @@
+let lines = ["hello", "world"];
+let removed = lines.splice(0, 1, "he", "llo");
+println(`array-splice-a=${removed.join("|")}:${lines.join("|")}`);
+let removed2 = lines.splice(1, 2, "lloworld");
+println(`array-splice-b=${removed2.join("|")}:${lines.join("|")}`);
+let nums = [1, 2, 5];
+let removed3 = nums.splice(-1, 0, 3, 4);
+println(`array-splice-c=${removed3.length}:${nums.join("|")}`);
+let tail = nums.splice(3);
+println(`array-splice-d=${tail.join("|")}:${nums.join("|")}`);

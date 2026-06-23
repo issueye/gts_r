@@ -208,6 +208,10 @@ fn all_parity_fixtures() -> Vec<Fixture> {
             expected: "array-slice-join=one:two:4\n",
         },
         Fixture {
+            dir: "array_splice",
+            expected: "array-splice-a=hello:he|llo|world\narray-splice-b=llo|world:he|lloworld\narray-splice-c=0:1|2|3|4|5\narray-splice-d=4|5:1|2|3\n",
+        },
+        Fixture {
             dir: "array_shift_unshift",
             expected: "array-shift-unshift=1:2|3\n",
         },
