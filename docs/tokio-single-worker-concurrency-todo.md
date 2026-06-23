@@ -72,8 +72,8 @@
 
 ## 阶段 5：gs-llm-bridge 切换
 
-- [ ] T5.1 代理非流式请求切到 `await http.requestAsync`
-  - 证据：`gs-llm-bridge/src/services/proxy_service.gs` 非流式路径完成切换。
+- [x] T5.1 代理非流式请求切到 `await http.requestAsync`
+  - 证据：`gs-llm-bridge/src/services/proxy_service.gs` 非流式路径从同步 `http.request` 切到 `http.requestAsync(...).then(...).catch(...)` Promise 链，handler 直接返回 pending Promise 给 `@std/web` 挂起响应；本地 mock OpenAI Chat 上游端到端验证通过，`POST /v1/chat/completions` 返回 200、内容 `async-ok`、上游命中 1 次。
 - [ ] T5.2 单 worker 代理压测
   - 证据：`chat same-protocol c=1,10,50 fail=0`。
 - [ ] T5.3 排队延迟验收
@@ -92,4 +92,4 @@
 
 ## 当前指针
 
-T5.1 代理非流式请求切到 `await http.requestAsync`。
+T5.2 单 worker 代理压测。
