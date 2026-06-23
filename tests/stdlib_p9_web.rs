@@ -6,7 +6,7 @@
 
 use std::fs;
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -81,6 +81,26 @@ fn http_round_trip(host: &str, port: u16, request: &str) -> (String, String, Str
     let body = parts.next().unwrap_or("").to_string();
     let status = head.lines().next().unwrap_or("").to_string();
     (status, head, body)
+}
+
+fn spawn_delayed_http_upstream(body: &'static str, delay: Duration) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind delayed upstream");
+    let addr = listener.local_addr().expect("delayed upstream addr");
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept delayed upstream request");
+        let mut buf = [0; 1024];
+        let _ = stream.read(&mut buf);
+        std::thread::sleep(delay);
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream
+            .write_all(response.as_bytes())
+            .expect("write delayed upstream response");
+    });
+    format!("http://{addr}/slow")
 }
 
 #[test]
@@ -318,6 +338,48 @@ app.listen(port);
         assert_eq!(body, "world");
     }
     let _ = child.kill();
+    let _ = child.wait();
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn web_handler_returned_promise_delays_response_until_settled() {
+    let dir = unique_temp_dir("gts-p9-web-promise-handler");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let upstream = spawn_delayed_http_upstream("upstream ready", Duration::from_millis(150));
+    let script = format!(
+        r#"
+let web = require("@std/web");
+let http = require("@std/http");
+let app = web.createApp();
+app.get("/proxy", function(ctx) {{
+  return http.requestAsync({{
+    url: "{upstream}",
+    method: "GET",
+    timeoutMs: 3000
+  }});
+}});
+let port = 18086;
+println(`GTS_PORT=${{port}}`);
+app.listen(port, {{count: 1}});
+"#
+    );
+    let (mut child, port) = spawn_server_script(&dir, &script);
+    std::thread::sleep(Duration::from_millis(100));
+    let start = std::time::Instant::now();
+    let (status, _head, body) = http_round_trip(
+        "127.0.0.1",
+        port,
+        "GET /proxy HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    let elapsed = start.elapsed();
+    assert!(status.contains("200"), "status was: {}", status);
+    assert_eq!(body, "");
+    assert!(
+        elapsed >= Duration::from_millis(120),
+        "response returned before handler promise settled: {:?}",
+        elapsed
+    );
     let _ = child.wait();
     let _ = fs::remove_dir_all(dir);
 }

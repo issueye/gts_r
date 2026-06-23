@@ -27,7 +27,7 @@ use crate::ast::Position;
 #[allow(unused_imports)]
 use crate::object::{
     bool_obj, format_number, new_error, num_obj, str_obj, strict_equal, ArrayData, Builtin,
-    CallContext, HashData, Object,
+    CallContext, HashData, Object, PromiseState,
 };
 #[allow(unused_imports)]
 use crate::VERSION;
@@ -633,6 +633,10 @@ fn web_handle_request(
                 err = Some(result.inspect());
                 break;
             }
+            if let Some(msg) = web_wait_handler_promise(ctx, &result) {
+                err = Some(msg);
+                break;
+            }
             if resp_state.borrow().body.is_some() {
                 break;
             }
@@ -676,6 +680,23 @@ fn web_handle_request(
     drop(state);
     let _ = request.respond(response);
     Ok(())
+}
+
+fn web_wait_handler_promise(ctx: &mut CallContext, result: &Object) -> Option<String> {
+    let Object::Promise(promise) = result else {
+        return None;
+    };
+    if promise.state() == PromiseState::Pending {
+        ctx.vm().wait_async();
+    }
+    let value = promise.wait();
+    if promise.state() == PromiseState::Rejected {
+        Some(value.inspect())
+    } else if value.is_runtime_error() {
+        Some(value.inspect())
+    } else {
+        None
+    }
 }
 
 fn web_handler_prefers_express_args(handler: &Object) -> bool {
