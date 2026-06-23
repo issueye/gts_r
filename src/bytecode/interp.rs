@@ -1,13 +1,17 @@
 //! The bytecode interpreter: a stack machine that executes a `Chunk`.
 //!
-//! Stage 0 implements only `Const` / `Add` / `Pop` / `Return`. The dispatch
-//! loop is structured so later stages add arms without reshaping control flow.
+//! [`interpret`] builds a [`VmState`] over the chunk and runs the dispatch
+//! loop, which handles the full opcode set: constants, the operator family,
+//! property/index access, calls and construction, closures/upvalues, classes,
+//! control flow (jumps, loop break/continue, try/catch/finally), modules,
+//! and async/await. Value-level semantics are delegated to `crate::evaluator`
+//! so behavior matches the tree-walker exactly.
 //!
 //! `Add` semantics mirror `evaluator::expressions::eval_add` byte-for-byte:
 //! number+number → numeric add, string+string → concatenation, mixed →
-//! TypeError. The full operator family is wired up in stage 1; for now only
-//! the two happy paths and the error are implemented so that the stage-0
-//! contract (`1 + 2` → `3.0`) holds while still rejecting bad types.
+//! TypeError. The main loop also samples the VM deadline every
+//! [`TIMEOUT_CHECK_INTERVAL`] instructions so `--timeout` can interrupt
+//! tight CPU loops.
 
 use crate::ast::{Position, TypeAnnotation, TypeKind};
 use crate::object::{

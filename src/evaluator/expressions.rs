@@ -157,6 +157,18 @@ fn eval_infix(i: &InfixExpr, env: &EnvRef) -> Object {
     if (i.op == "++" || i.op == "--") && i.right.is_none() {
         return eval_update(&i.left, env, &i.op, true, i.pos.clone());
     }
+    // Past the postfix ++/-- early return above, every other infix operator
+    // has a right operand (the parser guarantees it). Bind it once, safely,
+    // instead of `.unwrap()`-ing the Option at each use site.
+    let right = match &i.right {
+        Some(r) => r,
+        None => {
+            return new_error(
+                i.pos.clone(),
+                format!("SyntaxError: '{}' is missing its right-hand operand", i.op),
+            )
+        }
+    };
     let left = eval_expr(&i.left, env);
     if left.is_runtime_error() {
         return left;
@@ -166,27 +178,27 @@ fn eval_infix(i: &InfixExpr, env: &EnvRef) -> Object {
             if !left.is_truthy() {
                 return left;
             }
-            return eval_expr(i.right.as_ref().unwrap(), env);
+            return eval_expr(right, env);
         }
         "||" => {
             if left.is_truthy() {
                 return left;
             }
-            return eval_expr(i.right.as_ref().unwrap(), env);
+            return eval_expr(right, env);
         }
         "??" => {
             if !matches!(left, Object::Null | Object::Undefined) {
                 return left;
             }
-            return eval_expr(i.right.as_ref().unwrap(), env);
+            return eval_expr(right, env);
         }
         _ => {}
     }
-    let right = eval_expr(i.right.as_ref().unwrap(), env);
-    if right.is_runtime_error() {
-        return right;
+    let right_val = eval_expr(right, env);
+    if right_val.is_runtime_error() {
+        return right_val;
     }
-    apply_binary_op(i.op.as_str(), &left, &right, i.pos.clone())
+    apply_binary_op(i.op.as_str(), &left, &right_val, i.pos.clone())
 }
 
 /// Apply a binary operator to two already-evaluated operands.

@@ -362,9 +362,6 @@ impl Object {
                     .collect();
                 format!("Set({})", entries.len())
             }
-            Object::Function(f) => format!("[Function: {}]", f.name),
-            Object::Builtin(b) => format!("[Function: {}]", b.name),
-            Object::Class(c) => format!("[Class: {}]", c.borrow().name),
             Object::Closure(c) => {
                 let name = &c.proto.name;
                 if name.is_empty() {

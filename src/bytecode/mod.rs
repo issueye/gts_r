@@ -1,12 +1,17 @@
 //! Bytecode VM: AST → Chunk → interpretation.
 //!
-//! This module is the new execution pipeline described in
-//! `docs/bytecode-vm-development-plan.md`. It coexists with the tree-walking
-//! evaluator until full feature parity is reached; the tree-walker remains the
-//! default until stage 10.
+//! This is the default execution backend: the AST is compiled to a flat
+//! [`Chunk`] of opcodes (see [`compile`]) and executed by a stack machine
+//! ([`interpret`]). It covers the full language — statements, expressions,
+//! closures/upvalues, classes, try/catch, modules, and async/await — and is
+//! selected by default (`EXEC_MODE_BYTECODE`). The tree-walking evaluator
+//! remains available as an opt-in fallback via `--exec-mode=tree`.
 //!
-//! Stage 0 scope: `1 + 2` → `3.0`. Every other AST node is a deliberate
-//! compile error; see the stage plan for the coverage roadmap.
+//! All value-level semantics (operators, property/index access, calls,
+//! iteration) are delegated to `crate::evaluator` so the VM and the
+//! tree-walker stay byte-for-byte identical; the VM owns only the
+//! control-flow representation (jumps, loop frames, protected regions) and
+//! the call-frame/upvalue machinery.
 
 pub mod call;
 pub mod chunk;
