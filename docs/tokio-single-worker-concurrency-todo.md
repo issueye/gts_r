@@ -23,8 +23,8 @@
   - 证据：`gs-llm-bridge` bytecode 标准压测：`/healthz ~35k rps`，`chat same-protocol c=1/c=10 fail=0`；高并发出现 Windows `os error 10048`，说明出站连接复用不足。
 - [x] T0.2 明确不兼容式更新策略
   - 证据：`docs/tokio-single-worker-concurrency-plan.md` 已写入“不兼容式更新优先”原则。
-- [ ] T0.3 建立单 worker 并发验收 fixture
-  - 证据：待补测试，要求一个慢代理请求不阻塞同 worker 下的 `/healthz`。
+- [x] T0.3 建立单 worker 并发验收 fixture
+  - 证据：`tests/stdlib_p9_web.rs` 新增 ignored 测试 `web_single_worker_does_not_block_fast_route_while_slow_route_waits`；`cargo test --test stdlib_p9_web --release` 为 11 passed / 1 ignored。
 
 ## 阶段 1：Runtime 入口统一到 Tokio I/O
 
@@ -92,5 +92,4 @@
 
 ## 当前指针
 
-T0.3 建立单 worker 并发验收 fixture。
-
+T1.1 默认构建启用 Tokio 能力。

@@ -322,6 +322,63 @@ app.listen(port);
     let _ = fs::remove_dir_all(dir);
 }
 
+#[test]
+#[ignore = "requires async single-worker web runtime"]
+fn web_single_worker_does_not_block_fast_route_while_slow_route_waits() {
+    let dir = unique_temp_dir("gts-p9-web-single-worker-async");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let script = r#"
+let web = require("@std/web");
+let timers = require("@std/timers");
+let app = web.createApp();
+app.get("/slow", function(req, res) {
+  timers.sleep(500);
+  res.send("slow");
+});
+app.get("/healthz", function(req, res) {
+  res.send("ok");
+});
+let port = 18087;
+println(`GTS_PORT=${port}`);
+app.listen(port);
+"#;
+    let (mut child, port) = spawn_server_script(&dir, script);
+    std::thread::sleep(Duration::from_millis(100));
+
+    let slow = std::thread::spawn(move || {
+        http_round_trip(
+            "127.0.0.1",
+            port,
+            "GET /slow HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+        )
+    });
+
+    std::thread::sleep(Duration::from_millis(50));
+    let health_start = std::time::Instant::now();
+    let (status, _head, body) = http_round_trip(
+        "127.0.0.1",
+        port,
+        "GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    let health_elapsed = health_start.elapsed();
+
+    assert!(status.contains("200"), "status was: {}", status);
+    assert_eq!(body, "ok");
+    assert!(
+        health_elapsed < Duration::from_millis(150),
+        "single-worker fast route was blocked for {:?}",
+        health_elapsed
+    );
+
+    let (slow_status, _slow_head, slow_body) = slow.join().expect("join slow request");
+    assert!(slow_status.contains("200"), "status was: {}", slow_status);
+    assert_eq!(slow_body, "slow");
+
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = fs::remove_dir_all(dir);
+}
+
 // ---------------------------------------------------------------------------
 // Concurrent (prefork) server tests — `app.listen(port, { workers: N })`.
 //
