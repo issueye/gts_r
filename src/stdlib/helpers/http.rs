@@ -13,13 +13,14 @@ pub(crate) fn http_response_object(state: Rc<RefCell<HttpResponseState>>) -> Obj
     let obj = Rc::new(RefCell::new(HashData::default()));
 
     let s = state.clone();
+    let out = obj.clone();
     obj.borrow_mut().set(
         "status",
         native("response.status", move |_ctx, args| {
             if let Some(Object::Number(n)) = args.get(0) {
                 s.borrow_mut().status = Some(*n as u16);
             }
-            Object::Undefined
+            Object::Hash(out.clone())
         }),
     );
     let s = state.clone();

@@ -143,6 +143,36 @@ app.listen(port, {count: 1});
 }
 
 #[test]
+fn web_express_handler_receives_route_params() {
+    let dir = unique_temp_dir("gts-p9-web-express-params");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let script = r#"
+let web = require("@std/web");
+let app = web.createApp();
+app.post("/providers/:provider_id/models", function(req, res) {
+    res.json({ provider: req.params.provider_id });
+});
+let port = 18086;
+println(`GTS_PORT=${port}`);
+app.listen(port, {count: 1});
+"#;
+    let (mut child, port) = spawn_server_script(&dir, script);
+    std::thread::sleep(Duration::from_millis(100));
+    let (status, head, body) = http_round_trip(
+        "127.0.0.1",
+        port,
+        "POST /providers/perf-openai/models HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+    );
+    assert!(status.contains("200"), "status was: {}", status);
+    assert!(head
+        .to_ascii_lowercase()
+        .contains("content-type: application/json"));
+    assert_eq!(body, "{\"provider\": \"perf-openai\"}");
+    let _ = child.wait();
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn web_unmatched_route_returns_404() {
     let dir = unique_temp_dir("gts-p9-web-404");
     fs::create_dir_all(&dir).expect("create temp dir");
@@ -224,6 +254,71 @@ fn web_json_helper_serializes() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("\"a\": 1"), "stdout: {}", stdout);
     }
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn web_json_middleware_parses_request_body() {
+    let dir = unique_temp_dir("gts-p9-web-json-middleware");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let script = r#"
+let web = require("@std/web");
+let app = web.createApp();
+let port = 18084;
+println(`GTS_PORT=${port}`);
+app.use(web.json());
+app.post("/body", function(ctx) {
+  ctx.res.json({ name: ctx.req.body.name, age: ctx.req.body.age });
+});
+app.listen(port, {count: 1});
+"#;
+    let (mut child, port) = spawn_server_script(&dir, script);
+    std::thread::sleep(Duration::from_millis(100));
+    let (status, head, body) = http_round_trip(
+        "127.0.0.1",
+        port,
+        "POST /body HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 25\r\nConnection: close\r\n\r\n{\"name\":\"alice\",\"age\":30}",
+    );
+    assert!(status.contains("200"), "status was: {}", status);
+    assert!(
+        head.to_ascii_lowercase()
+            .contains("content-type: application/json"),
+        "head: {}",
+        head
+    );
+    assert!(body.contains("\"name\": \"alice\""), "body: {}", body);
+    assert!(body.contains("\"age\": 30"), "body: {}", body);
+    let _ = child.wait();
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn web_listen_default_serves_multiple_requests() {
+    let dir = unique_temp_dir("gts-p9-web-default-listen");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let script = r#"
+let web = require("@std/web");
+let app = web.createApp();
+app.get("/hello", function(req, res, next) {
+  res.send("world");
+});
+let port = 18085;
+println(`GTS_PORT=${port}`);
+app.listen(port);
+"#;
+    let (mut child, port) = spawn_server_script(&dir, script);
+    std::thread::sleep(Duration::from_millis(100));
+    for _ in 0..2 {
+        let (status, _head, body) = http_round_trip(
+            "127.0.0.1",
+            port,
+            "GET /hello HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+        );
+        assert!(status.contains("200"), "status was: {}", status);
+        assert_eq!(body, "world");
+    }
+    let _ = child.kill();
+    let _ = child.wait();
     let _ = fs::remove_dir_all(dir);
 }
 

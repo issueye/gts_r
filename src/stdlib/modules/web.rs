@@ -270,12 +270,14 @@ fn web_listen(ctx: &mut CallContext, app: &Rc<WebApp>, args: &[Object]) -> Objec
         Err(e) => return e,
     };
 
-    // Parse options. Defaults: count=1, workers=0 (unset).
+    // Parse options. Defaults: long-running single worker. Explicit `count`
+    // keeps the bounded serial behavior used by unit tests.
     let mut count: usize = 1;
-    let mut workers: usize = 0;
+    let mut workers: usize = 1;
     if let Some(Object::Hash(opts)) = args.get(1) {
         if let Some(Object::Number(n)) = opts.borrow().get("count") {
             count = *n as usize;
+            workers = 0;
         }
         if let Some(Object::Number(n)) = opts.borrow().get("workers") {
             workers = *n as usize;
@@ -508,6 +510,10 @@ fn web_handle_request(
     let method = request.method().as_str().to_ascii_uppercase();
     let url = request.url().to_string();
     let path = url.split('?').next().unwrap_or(&url).to_string();
+    let remote_addr = request
+        .remote_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_default();
 
     // Read body (borrows request immutably via as_reader).
     let mut body_buf = Vec::new();
@@ -546,6 +552,19 @@ fn web_handle_request(
     }
 
     let resp_state = Rc::new(RefCell::new(HttpResponseState::default()));
+    let req_obj = Rc::new(RefCell::new(HashData::default()));
+    req_obj.borrow_mut().set("method", str_obj(method.clone()));
+    req_obj.borrow_mut().set("url", str_obj(url.clone()));
+    req_obj.borrow_mut().set("path", str_obj(path.clone()));
+    req_obj.borrow_mut().set("body", str_obj(body.clone()));
+    req_obj.borrow_mut().set("remoteAddr", str_obj(remote_addr));
+    req_obj
+        .borrow_mut()
+        .set("query", Object::Hash(query_obj.clone()));
+    req_obj
+        .borrow_mut()
+        .set("headers", Object::Hash(headers_obj.clone()));
+    let res_obj = http_response_object(resp_state.clone());
     let req_segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
 
     // Collect the chain of handlers to invoke, in route-registration order.
@@ -582,20 +601,34 @@ fn web_handle_request(
         g.body = Some(format!("Not Found: {} {}", method, path).into_bytes());
         None
     } else {
-        // Run the matched handler chain. Each handler receives (ctx).
+        // Run the matched handler chain. Handlers can use either (ctx) or
+        // Express-style (req, res, next).
         let mut err: Option<String> = None;
         for (handler, params) in chain {
             let ctx_obj = web_context_object(
-                &method,
-                &url,
-                &path,
-                &body,
+                req_obj.clone(),
+                res_obj.clone(),
                 &query_obj,
                 &headers_obj,
                 &params,
-                &resp_state,
             );
-            let result = call_script_function(&handler, ctx.env, &[ctx_obj]);
+            let result = if web_handler_prefers_express_args(&handler) {
+                call_script_function(
+                    &handler,
+                    ctx.env,
+                    &[
+                        Object::Hash(req_obj.clone()),
+                        res_obj.clone(),
+                        Object::Builtin(Rc::new(Builtin {
+                            name: "web.next".to_string(),
+                            func: Rc::new(|_ctx, _args| Object::Undefined),
+                            extra: None,
+                        })),
+                    ],
+                )
+            } else {
+                call_script_function(&handler, ctx.env, &[ctx_obj])
+            };
             if result.is_runtime_error() {
                 err = Some(result.inspect());
                 break;
@@ -645,22 +678,22 @@ fn web_handle_request(
     Ok(())
 }
 
-/// Build the Express-style context object: `{req, res, params}`.
+fn web_handler_prefers_express_args(handler: &Object) -> bool {
+    match handler {
+        Object::Function(f) => f.params.len() >= 2,
+        Object::Closure(c) => c.proto.params.len() >= 2,
+        _ => false,
+    }
+}
+
+/// Build the context object: `{req, res, params}`.
 fn web_context_object(
-    method: &str,
-    url: &str,
-    path: &str,
-    body: &str,
+    req_obj: Rc<RefCell<HashData>>,
+    res_obj: Object,
     query: &Rc<RefCell<HashData>>,
     headers: &Rc<RefCell<HashData>>,
     params: &[(String, String)],
-    resp_state: &Rc<RefCell<HttpResponseState>>,
 ) -> Object {
-    let req_obj = Rc::new(RefCell::new(HashData::default()));
-    req_obj.borrow_mut().set("method", str_obj(method));
-    req_obj.borrow_mut().set("url", str_obj(url));
-    req_obj.borrow_mut().set("path", str_obj(path));
-    req_obj.borrow_mut().set("body", str_obj(body));
     req_obj
         .borrow_mut()
         .set("query", Object::Hash(query.clone()));
@@ -672,12 +705,13 @@ fn web_context_object(
     for (k, v) in params {
         params_obj.borrow_mut().set(k.clone(), str_obj(v.clone()));
     }
+    req_obj
+        .borrow_mut()
+        .set("params", Object::Hash(params_obj.clone()));
 
     let ctx_obj = Rc::new(RefCell::new(HashData::default()));
     ctx_obj.borrow_mut().set("req", Object::Hash(req_obj));
-    ctx_obj
-        .borrow_mut()
-        .set("res", http_response_object(resp_state.clone()));
+    ctx_obj.borrow_mut().set("res", res_obj);
     ctx_obj.borrow_mut().set("params", Object::Hash(params_obj));
     Object::Hash(ctx_obj)
 }
@@ -687,12 +721,39 @@ fn web_context_object(
 // files requires the same async event loop as a long-running server. Scripts
 // can read a file with `@std/fs` and call `res.send(contents)` instead.
 
-/// `web.json(obj)` returns a string of JSON — usable as a response body or
-/// standalone serializer.
-fn web_json_helper(ctx: &mut CallContext, args: &[Object]) -> Object {
+/// `web.json()` returns a request-body parser middleware; `web.json(obj)`
+/// keeps the historical serializer behavior.
+fn web_json_helper(_ctx: &mut CallContext, args: &[Object]) -> Object {
     match args.get(0) {
         Some(v) => str_obj(value_to_json(v)),
-        None => new_error(ctx.pos.clone(), "web.json requires a value"),
+        None => native("web.json.middleware", |ctx, args| {
+            let Some(Object::Hash(ctx_obj)) = args.first() else {
+                return Object::Undefined;
+            };
+            let req_obj = {
+                let ctx_ref = ctx_obj.borrow();
+                match ctx_ref.get("req") {
+                    Some(Object::Hash(req_obj)) => req_obj.clone(),
+                    _ => return Object::Undefined,
+                }
+            };
+            let body = match req_obj.borrow().get("body") {
+                Some(Object::String(s)) => s.to_string(),
+                _ => String::new(),
+            };
+            if body.trim().is_empty() {
+                return Object::Undefined;
+            }
+            match simple_json_parse(&body) {
+                Ok(value) => {
+                    req_obj
+                        .borrow_mut()
+                        .set("body", crate::stdlib::helpers::json_to_object(value));
+                    Object::Undefined
+                }
+                Err(err) => new_error(ctx.pos.clone(), format!("web.json: {}", err)),
+            }
+        }),
     }
 }
 
