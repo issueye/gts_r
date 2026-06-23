@@ -56,8 +56,8 @@
   - 证据：`Cargo.toml` 在 tokio feature 下新增 `reqwest`；`src/stdlib/modules/net_http_client.rs` 的 `requestAsync` 切到全局复用 Tokio runtime + reqwest client，启用 keep-alive 连接池；`tests/stdlib_p8_http.rs` 新增本地 keep-alive fixture，64 次 `await http.requestAsync` 只允许服务端接受一条 TCP 连接，用于验证顺序请求复用连接并减少 Windows 端口 churn；验证：`cargo fmt --check`、`cargo test --release --test stdlib_p8_http http_client_request_async -- --nocapture` 通过。
 - [x] T3.3 收敛同步 `http.request`
   - 证据：`src/stdlib/modules/net_http_client.rs` 的 `http.request`/`http.fetch` 改为同一套全局 reqwest client 的阻塞薄包装，默认 tokio feature 下不再走旧 `ureq` request 主路径；`tests/stdlib_p8_http.rs` 新增 `http_client_request_uses_pooled_tokio_client`，16 次同步 `http.request` 只允许本地服务端接受一条 TCP 连接；验证：`cargo fmt --check`、`cargo test --release --test stdlib_p8_http http_client_request_uses_pooled_tokio_client -- --nocapture` 通过。
-- [ ] T3.4 HTTP async 并发测试
-  - 证据：并发请求本地 mock upstream，fail=0。
+- [x] T3.4 HTTP async 并发测试
+  - 证据：`tests/stdlib_p8_http.rs` 新增 `http_client_request_async_handles_concurrency`，32 个并发 `await http.requestAsync` 本地 mock upstream 全部成功，脚本汇总 `fail=0`；验证：`cargo fmt --check`、`cargo test --release --test stdlib_p8_http http_client_request_async_handles_concurrency -- --nocapture` 通过。
 
 ## 阶段 4：Web Handler Promise 化
 
@@ -92,4 +92,4 @@
 
 ## 当前指针
 
-T3.4 HTTP async 并发测试。
+T4.1 `@std/web` 支持 handler 返回 Promise。

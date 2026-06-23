@@ -367,6 +367,7 @@ async fn async_http_response_from_reqwest(
     })
 }
 
+#[cfg(not(feature = "tokio"))]
 fn async_http_response_from_ureq(
     response: ureq::Response,
     status_override: Option<u16>,

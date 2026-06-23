@@ -85,6 +85,38 @@ fn spawn_keepalive_http_server(expected: usize) -> (String, thread::JoinHandle<(
     (format!("http://{addr}/pooled"), handle)
 }
 
+fn spawn_concurrent_http_server(expected: usize) -> (String, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind concurrent mock server");
+    let addr = listener.local_addr().expect("mock server addr");
+    let handle = thread::spawn(move || {
+        let mut accepted = 0usize;
+        let mut workers = Vec::new();
+        while accepted < expected {
+            let (mut stream, _) = listener.accept().expect("accept concurrent request");
+            accepted += 1;
+            workers.push(thread::spawn(move || {
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .expect("set read timeout");
+                read_http_head(&mut stream);
+                let body = format!("job-{accepted}");
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write concurrent response");
+            }));
+        }
+        for worker in workers {
+            worker.join().expect("concurrent response worker");
+        }
+    });
+    (format!("http://{addr}/concurrent"), handle)
+}
+
 #[test]
 fn http_client_get_returns_response() {
     let dir = unique_temp_dir("http_get");
@@ -314,4 +346,46 @@ fn http_client_request_uses_pooled_tokio_client() {
     );
     server.join().expect("keepalive server");
     assert!(String::from_utf8_lossy(&out.stdout).contains("pooled sync request test passed"));
+}
+
+#[test]
+fn http_client_request_async_handles_concurrency() {
+    let dir = unique_temp_dir("http_request_async_concurrent");
+    fs::create_dir_all(&dir).unwrap();
+    let request_count = 32;
+    let (url, server) = spawn_concurrent_http_server(request_count);
+    let script = format!(
+        r#"
+        const http = require("@std/http");
+        let pending = [];
+        for (let i = 0; i < {request_count}; i = i + 1) {{
+            pending.push(http.requestAsync({{
+                url: "{url}",
+                method: "GET",
+                timeoutMs: 3000
+            }}));
+        }}
+        let fail = 0;
+        for (let i = 0; i < pending.length; i = i + 1) {{
+            const resp = await pending[i];
+            if (resp.status !== 200) {{
+                fail = fail + 1;
+            }}
+        }}
+        if (fail !== 0) {{
+            throw new Error("expected fail=0, got " + fail);
+        }}
+        print("concurrent async test passed");
+    "#
+    );
+    let out = run_script(&dir, &script);
+    fs::remove_dir_all(&dir).ok();
+    assert!(
+        out.status.success(),
+        "script failed\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    server.join().expect("concurrent server");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("concurrent async test passed"));
 }
