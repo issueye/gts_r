@@ -1,4 +1,8 @@
-//! Focused parity tests for the @std/tui module.
+//! Integration tests for the redesigned @std/tui module.
+//!
+//! These run scripts via the `gs` binary (non-TTY subprocess), which exercises
+//! the node-tree → flexbox → render pipeline through `app.render` (the
+//! non-interactive single-frame path) rather than `app.run`'s event loop.
 
 use std::fs;
 use std::path::PathBuf;
@@ -26,116 +30,297 @@ fn stdout_of(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
-fn stderr_of(output: &std::process::Output) -> String {
-    String::from_utf8_lossy(&output.stderr).into_owned()
+/// Strip ANSI CSI/OSC escape sequences for layout-content comparisons.
+fn strip_ansi(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+            i += 2;
+            while i < bytes.len() && !(0x40..=0x7e).contains(&bytes[i]) {
+                i += 1;
+            }
+            if i < bytes.len() {
+                i += 1;
+            }
+            continue;
+        }
+        let start = i;
+        i += 1;
+        while i < bytes.len() && (bytes[i] & 0xc0) == 0x80 {
+            i += 1;
+        }
+        if let Ok(ch) = std::str::from_utf8(&bytes[start..i]) {
+            out.push_str(ch);
+        }
+    }
+    out
 }
 
+// --- node constructors return markers -------------------------------------
+
 #[test]
-fn tui_constructs_messages_and_layouts() {
-    let dir = unique_temp_dir("gts-tui-layout");
+fn text_node_is_a_tui_node_marker() {
+    let dir = unique_temp_dir("gts-tui-text-node");
     fs::create_dir_all(&dir).expect("create temp dir");
-    let output = run_script(
-        &dir,
-        r#"
+    let script = r#"
 let tui = require("@std/tui");
-let key = tui.key("ctrl+c", "\x03");
-let text = tui.text("hello");
-let resize = tui.resize(12, 3);
-println(key.type + ":" + key.key + ":" + key.raw);
-println(text.type + ":" + text.text + ":" + text.raw);
-println(resize.type + ":" + String(resize.cols) + ":" + String(resize.rows) + ":" + String(resize.stable));
-
-let boxA = tui.box("A", { width: 7, title: "one" });
-let boxB = tui.box("B", { width: 5 });
-let row = tui.row(boxA, boxB);
-println(row.indexOf("one") >= 0);
-println(row.indexOf("A") >= 0);
-println(row.indexOf("B") >= 0);
-
-let status = tui.statusBar({ left: "L", center: "C", right: "R" }, 9);
-println(status.length);
-println(tui.stripAnsi(tui.style("ok", { fg: "accent", bold: true })));
-"#,
-    );
-    assert!(output.status.success(), "stderr: {}", stderr_of(&output));
-    let stdout = stdout_of(&output);
-    let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines[0], "key:ctrl+c:\x03");
-    assert_eq!(lines[1], "text:hello:hello");
-    assert_eq!(lines[2], "resize:12:3:true");
-    assert_eq!(lines[3], "true");
-    assert_eq!(lines[4], "true");
-    assert_eq!(lines[5], "true");
-    assert_eq!(lines[6], "9");
-    assert_eq!(lines[7], "ok");
+let n = tui.text("hi");
+println(typeof n);
+println(n.__kind);
+"#;
+    let output = run_script(&dir, script);
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let out = stdout_of(&output);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines[0], "object");
+    assert_eq!(lines[1], "tuiNode");
     let _ = fs::remove_dir_all(dir);
 }
 
-#[test]
-fn tui_input_renders_cursor_and_respects_width() {
-    let dir = unique_temp_dir("gts-tui-input");
-    fs::create_dir_all(&dir).expect("create temp dir");
-    let output = run_script(
-        &dir,
-        r#"
-let tui = require("@std/tui");
-let rendered = tui.input({
-  width: 18,
-  title: "Prompt",
-  value: "hello",
-  cursor: 2,
-  meta: "meta",
-});
-println(tui.stripAnsi(rendered).indexOf("Prompt") >= 0);
-println(rendered.indexOf("\x1b[7m \x1b[0m") >= 0);
-let lines = rendered.split("\n");
-let ok = true;
-for (let i = 0; i < lines.length; i = i + 1) {
-  if (tui.width(lines[i]) > 18) {
-    ok = false;
-  }
-}
-println(ok);
-"#,
-    );
-    assert!(output.status.success(), "stderr: {}", stderr_of(&output));
-    assert_eq!(stdout_of(&output), "true\ntrue\ntrue\n");
-    let _ = fs::remove_dir_all(dir);
-}
+// --- app.render produces a text frame from a node tree --------------------
 
 #[test]
-fn tui_app_dispatches_and_renders_script_state() {
-    let dir = unique_temp_dir("gts-tui-app");
+fn app_render_renders_text_node() {
+    let dir = unique_temp_dir("gts-tui-render-text");
     fs::create_dir_all(&dir).expect("create temp dir");
-    let output = run_script(
-        &dir,
-        r#"
+    let script = r#"
 let tui = require("@std/tui");
 let app = tui.createApp({
-  init: function(size) {
-    return { count: 0, cols: size.cols };
-  },
-  update: function(state, msg) {
-    if (msg.type === "text") {
-      state.count = state.count + 1;
-    }
-    if (msg.type === "key" && msg.key === "ctrl+c") {
-      return { state: state, quit: true };
-    }
-    return state;
-  },
-  view: function(state, size) {
-    return "count=" + String(state.count) + " cols=" + String(size.cols);
-  },
+  state: "Hello",
+  view: (state, size) => tui.text(state),
 });
-app.dispatch(tui.text("a"));
-app.dispatch(tui.text("b"));
-println(app.render({ cols: 12, rows: 3 }));
-app.dispatch(tui.key("ctrl+c"));
-println(app.state().count);
-"#,
-    );
-    assert!(output.status.success(), "stderr: {}", stderr_of(&output));
-    assert_eq!(stdout_of(&output), "count=2 cols=12\n2\n");
+let frame = app.render({cols: 10, rows: 1});
+println(frame);
+"#;
+    let output = run_script(&dir, script);
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let out = stdout_of(&output);
+    // "Hello" left-aligned, padded to 10 cols on a single line (no trim: the
+    // trailing spaces are part of the frame).
+    assert_eq!(out, "Hello     \n");
+    let _ = fs::remove_dir_all(dir);
+}
+
+// --- flexbox: row lays children side by side ------------------------------
+
+#[test]
+fn row_layout_places_children_horizontally() {
+    let dir = unique_temp_dir("gts-tui-row");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let script = r#"
+let tui = require("@std/tui");
+let app = tui.createApp({
+  state: null,
+  view: (_s, _size) => tui.row({
+    children: [tui.text("AB"), tui.text("CD")],
+  }),
+});
+let frame = app.render({cols: 8, rows: 1});
+println(frame);
+"#;
+    let output = run_script(&dir, script);
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let out = stdout_of(&output);
+    assert_eq!(out, "ABCD    \n");
+    let _ = fs::remove_dir_all(dir);
+}
+
+// --- flexbox: column stacks children vertically ---------------------------
+
+#[test]
+fn column_layout_stacks_children_vertically() {
+    let dir = unique_temp_dir("gts-tui-column");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let script = r#"
+let tui = require("@std/tui");
+let app = tui.createApp({
+  state: null,
+  view: (_s, _size) => tui.column({
+    children: [tui.text("A"), tui.text("B")],
+  }),
+});
+let frame = app.render({cols: 3, rows: 2});
+println("FRAME");
+println(frame);
+println("END");
+"#;
+    let output = run_script(&dir, script);
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let out = stdout_of(&output);
+    let lines: Vec<&str> = out.lines().collect();
+    let frame_start = lines.iter().position(|l| *l == "FRAME").unwrap() + 1;
+    assert_eq!(lines[frame_start], "A  ");
+    assert_eq!(lines[frame_start + 1], "B  ");
+    let _ = fs::remove_dir_all(dir);
+}
+
+// --- box with border draws box-drawing characters -------------------------
+
+#[test]
+fn box_with_border_renders_frame() {
+    let dir = unique_temp_dir("gts-tui-border");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let script = r#"
+let tui = require("@std/tui");
+let app = tui.createApp({
+  state: null,
+  view: (_s, _size) => tui.box({
+    width: 5, height: 3, border: true,
+    children: [tui.text("X")],
+  }),
+});
+let frame = app.render({cols: 5, rows: 3});
+println("FRAME");
+println(frame);
+println("END");
+"#;
+    let output = run_script(&dir, script);
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let out = stdout_of(&output);
+    let lines: Vec<&str> = out.lines().collect();
+    let frame_start = lines.iter().position(|l| *l == "FRAME").unwrap() + 1;
+    assert_eq!(lines[frame_start], "┌───┐");
+    assert_eq!(lines[frame_start + 1], "│X  │");
+    assert_eq!(lines[frame_start + 2], "└───┘");
+    let _ = fs::remove_dir_all(dir);
+}
+
+// --- progress bar renders filled/empty cells ------------------------------
+
+#[test]
+fn progress_bar_renders_half_filled() {
+    let dir = unique_temp_dir("gts-tui-progress");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let script = r#"
+let tui = require("@std/tui");
+let app = tui.createApp({
+  state: null,
+  view: (_s, _size) => tui.progress({ value: 50, total: 100, width: 8 }),
+});
+let frame = app.render({cols: 8, rows: 1});
+println(frame);
+"#;
+    let output = run_script(&dir, script);
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let out = stdout_of(&output);
+    assert_eq!(out.trim_end(), "[███░░░]");
+    let _ = fs::remove_dir_all(dir);
+}
+
+// --- checkbox renders checked/unchecked markers ---------------------------
+
+#[test]
+fn checkbox_renders_checked_and_unchecked() {
+    let dir = unique_temp_dir("gts-tui-checkbox");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let script = r#"
+let tui = require("@std/tui");
+let app = tui.createApp({
+  state: null,
+  view: (_s, _size) => tui.column({
+    children: [
+      tui.checkbox({ checked: true, label: "done" }),
+      tui.checkbox({ checked: false, label: "todo" }),
+    ],
+  }),
+});
+let frame = app.render({cols: 12, rows: 2});
+println("FRAME");
+println(frame);
+println("END");
+"#;
+    let output = run_script(&dir, script);
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let out = stdout_of(&output);
+    let lines: Vec<&str> = out.lines().collect();
+    let frame_start = lines.iter().position(|l| *l == "FRAME").unwrap() + 1;
+    // Compare ANSI-stripped: styling may place reset codes in padding cells.
+    assert_eq!(strip_ansi(&lines[frame_start]).trim_end(), "[x] done");
+    assert_eq!(strip_ansi(&lines[frame_start + 1]).trim_end(), "[ ] todo");
+    let _ = fs::remove_dir_all(dir);
+}
+
+// --- list renders selection marker ----------------------------------------
+
+#[test]
+fn list_renders_selected_marker() {
+    let dir = unique_temp_dir("gts-tui-list");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let script = r#"
+let tui = require("@std/tui");
+let app = tui.createApp({
+  state: null,
+  view: (_s, _size) => tui.list({ items: ["alpha", "beta"], selected: 1, focused: false }),
+});
+let frame = app.render({cols: 10, rows: 2});
+println("FRAME");
+println(frame);
+println("END");
+"#;
+    let output = run_script(&dir, script);
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let out = stdout_of(&output);
+    let lines: Vec<&str> = out.lines().collect();
+    let frame_start = lines.iter().position(|l| *l == "FRAME").unwrap() + 1;
+    assert_eq!(strip_ansi(&lines[frame_start]).trim_end(), "  alpha");
+    // selected item (index 1) is bolded; marker "› ".
+    let sel = strip_ansi(&lines[frame_start + 1]);
+    assert!(sel.contains("›") && sel.contains("beta"), "got: {:?}", sel);
+    let _ = fs::remove_dir_all(dir);
+}
+
+// --- Elm dispatch: update + quit ------------------------------------------
+
+#[test]
+fn app_dispatch_updates_state_and_quit() {
+    let dir = unique_temp_dir("gts-tui-dispatch");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let script = r#"
+let tui = require("@std/tui");
+let app = tui.createApp({
+  init: () => 0,
+  update: (state, msg) => {
+    if (msg.type === "tick") {
+      let next = state + 1;
+      return { state: next, quit: next >= 3 };
+    }
+    return { state: state };
+  },
+  view: (state, _size) => tui.text(String(state)),
+});
+app.dispatch(tui.tick());
+app.dispatch(tui.tick());
+let before = app.state();
+app.dispatch(tui.tick());
+let after = app.state();
+println(before);
+println(after);
+"#;
+    let output = run_script(&dir, script);
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let out = stdout_of(&output);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines[0], "2");
+    assert_eq!(lines[1], "3");
+    let _ = fs::remove_dir_all(dir);
+}
+
+// --- terminal capabilities report real rawMode ----------------------------
+
+#[test]
+fn terminal_capabilities_report_raw_mode() {
+    let dir = unique_temp_dir("gts-tui-termcaps");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let script = r#"
+let term = require("@std/terminal");
+let caps = term.capabilities();
+println(caps.rawMode);
+"#;
+    let output = run_script(&dir, script);
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let out = stdout_of(&output);
+    assert_eq!(out.trim_end(), "true");
     let _ = fs::remove_dir_all(dir);
 }

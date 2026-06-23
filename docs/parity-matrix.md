@@ -71,7 +71,7 @@
 | Stdlib | `@std/validation` | compatible | 校验器 |
 | Stdlib | `@std/template` | compatible | 字符串模板引擎 |
 | Stdlib | `@std/compression` / `@std/compress/gzip` | compatible | flate2 |
-| Stdlib | `@std/terminal` | partial | 基础终端控制(光标/清屏),高级待补 |
+| Stdlib | `@std/terminal` | compatible | 终端控制(光标/清屏/标题/超链接/样式) + **真实 raw mode(crossterm,引用计数)** + read + start 会话 + alternateScreen/hideCursor/showCursor |
 | Stdlib | `@std/cli` | compatible | 命令行参数解析 |
 | Stdlib | `@std/toml` | compatible | parse/stringify(toml crate) |
 | Stdlib | `@std/yaml` | compatible | serde_yaml |
@@ -102,7 +102,7 @@
 | Stdlib | `@std/image` / `@std/pdf` | compatible | info(path) 占位(对齐 Go 版 placeholder) |
 | Stdlib | `@std/async` | compatible | async 工具(依赖 Promise) |
 | Stdlib | `@std/web` (含 `@std/express` 别名) | compatible | createApp + 路由 + 中间件 + **listen({workers:N}) prefork 并发** + 单 worker 异步不阻塞 + 流式/SSE |
-| Stdlib | `@std/tui` | partial | 基础交互式 TUI 已实现,深度能力待补 |
+| Stdlib | `@std/tui` | compatible | Ink 式声明节点树 + 原生 flexbox 布局引擎(createApp/run + text/box/row/column/input/list/table/progress/checkbox + 节点树测量/布局/渲染) |
 | Stdlib | `@std/gtp/client` | compatible | connectTcp/connect/call/recv/close/isAlive |
 | Stdlib | `@std/gtp/server` | partial | 占位 |
 | GTP | sdk frame/jsonl | compatible | 与 Go 版逐字节兼容 |

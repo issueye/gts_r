@@ -47,6 +47,23 @@ pub(crate) fn terminal_module() -> Object {
             "hyperlink",
             native("terminal.hyperlink", terminal_hyperlink),
         ),
+        // New: real crossterm-backed screen/cursor control.
+        (
+            "enterAlternateScreen",
+            native("terminal.enterAlternateScreen", terminal_enter_alternate_screen),
+        ),
+        (
+            "leaveAlternateScreen",
+            native("terminal.leaveAlternateScreen", terminal_leave_alternate_screen),
+        ),
+        (
+            "hideCursor",
+            native("terminal.hideCursor", terminal_hide_cursor),
+        ),
+        (
+            "showCursor",
+            native("terminal.showCursor", terminal_show_cursor),
+        ),
     ])
 }
 
@@ -75,14 +92,22 @@ pub(crate) fn terminal_capabilities(_ctx: &mut CallContext, _args: &[Object]) ->
     module(vec![
         ("clearScrollback", bool_obj(true)),
         ("alternateScreen", bool_obj(true)),
-        ("resizeEvents", bool_obj(false)),
+        ("resizeEvents", bool_obj(crossterm::terminal::supports_keyboard_enhancement().is_ok())),
         ("virtualTerminal", bool_obj(true)),
-        ("rawMode", bool_obj(false)),
+        ("rawMode", bool_obj(true)),
     ])
 }
 
+/// Read one line from stdin (blocking, line-buffered). Returns the line
+/// without the trailing newline, or "" at EOF.
 pub(crate) fn terminal_read(_ctx: &mut CallContext, _args: &[Object]) -> Object {
-    str_obj("")
+    use std::io::BufRead;
+    let mut line = String::new();
+    match std::io::stdin().lock().read_line(&mut line) {
+        Ok(0) => str_obj(""),
+        Ok(_) => str_obj(line.trim_end_matches(['\n', '\r'])),
+        Err(_) => str_obj(""),
+    }
 }
 
 pub(crate) fn terminal_write(ctx: &mut CallContext, args: &[Object]) -> Object {
@@ -124,34 +149,119 @@ pub(crate) fn terminal_render_frame(ctx: &mut CallContext, args: &[Object]) -> O
     }
 }
 
+/// Raw-mode refcount so nested enable/disable calls stay balanced.
+thread_local! {
+    static RAW_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Enable raw mode (crossterm). Returns `{raw: bool, restore: fn}` where
+/// `restore` disables raw mode. Idempotent / refcounted.
 pub(crate) fn terminal_set_raw_mode(_ctx: &mut CallContext, _args: &[Object]) -> Object {
+    let enabled = RAW_DEPTH.with(|d| {
+        let depth = d.get();
+        if depth == 0 {
+            if crossterm::terminal::enable_raw_mode().is_ok() {
+                d.set(1);
+                true
+            } else {
+                false
+            }
+        } else {
+            d.set(depth + 1);
+            true
+        }
+    });
     module(vec![
-        ("raw", bool_obj(false)),
+        ("raw", bool_obj(enabled)),
         (
             "restore",
-            native("terminal.restoreRawMode", |_ctx, _args| Object::Undefined),
+            native("terminal.restoreRawMode", |_ctx, _args| {
+                disable_raw_mode_refcount();
+                Object::Undefined
+            }),
         ),
     ])
 }
 
+/// Decrement the raw-mode refcount; disable when it reaches zero.
+fn disable_raw_mode_refcount() {
+    RAW_DEPTH.with(|d| {
+        let depth = d.get();
+        if depth <= 1 {
+            let _ = crossterm::terminal::disable_raw_mode();
+            d.set(0);
+        } else {
+            d.set(depth - 1);
+        }
+    });
+}
+
+/// Start an interactive terminal session: enables raw mode and returns a
+/// session object with write/writeln/size/restore/stop methods. `stop` and
+/// `restore` both drop out of raw mode.
 pub(crate) fn terminal_start(_ctx: &mut CallContext, _args: &[Object]) -> Object {
+    let active = RAW_DEPTH.with(|d| {
+        let depth = d.get();
+        if depth == 0 {
+            if crossterm::terminal::enable_raw_mode().is_ok() {
+                d.set(1);
+                true
+            } else {
+                false
+            }
+        } else {
+            d.set(depth + 1);
+            true
+        }
+    });
     module(vec![
-        ("active", bool_obj(false)),
+        ("active", bool_obj(active)),
         ("write", native("terminal.session.write", terminal_write)),
-        (
-            "writeln",
-            native("terminal.session.writeln", terminal_writeln),
-        ),
+        ("writeln", native("terminal.session.writeln", terminal_writeln)),
         ("size", native("terminal.session.size", terminal_size)),
         (
             "restore",
-            native("terminal.session.restore", |_ctx, _args| Object::Undefined),
+            native("terminal.session.restore", |_ctx, _args| {
+                disable_raw_mode_refcount();
+                Object::Undefined
+            }),
         ),
         (
             "stop",
-            native("terminal.session.stop", |_ctx, _args| Object::Undefined),
+            native("terminal.session.stop", |_ctx, _args| {
+                disable_raw_mode_refcount();
+                Object::Undefined
+            }),
         ),
     ])
+}
+
+/// Switch to the alternate screen buffer.
+pub(crate) fn terminal_enter_alternate_screen(_ctx: &mut CallContext, _args: &[Object]) -> Object {
+    use std::io::Write;
+    let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::EnterAlternateScreen);
+    Object::Undefined
+}
+
+/// Leave the alternate screen buffer, returning to the main buffer.
+pub(crate) fn terminal_leave_alternate_screen(_ctx: &mut CallContext, _args: &[Object]) -> Object {
+    use std::io::Write;
+    let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+    Object::Undefined
+}
+
+/// Hide the cursor.
+pub(crate) fn terminal_hide_cursor(_ctx: &mut CallContext, _args: &[Object]) -> Object {
+    use std::io::Write;
+    let _ = crossterm::execute!(std::io::stdout(), crossterm::cursor::Hide);
+    Object::Undefined
+}
+
+/// Show the cursor.
+pub(crate) fn terminal_show_cursor(_ctx: &mut CallContext, _args: &[Object]) -> Object {
+    use std::io::Write;
+    let _ = crossterm::execute!(std::io::stdout(), crossterm::cursor::Show);
+    Object::Undefined
 }
 
 pub(crate) fn terminal_clear_screen(_ctx: &mut CallContext, _args: &[Object]) -> Object {

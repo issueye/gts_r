@@ -54,6 +54,43 @@ pub(crate) fn strip_ansi(input: &str) -> String {
     out
 }
 
+/// Display width of a string after stripping ANSI escapes (pure; no CallContext).
+pub(crate) fn visible_width(value: &str) -> usize {
+    let stripped = strip_ansi(value);
+    let mut total = 0usize;
+    for r in stripped.chars() {
+        if r == '\n' || r == '\r' {
+            // width is per-line; callers split on \n first.
+            continue;
+        }
+        total += rune_width(r);
+    }
+    total
+}
+
+/// Wrap a single line (no embedded newlines) to at most `width` display cells.
+/// Returns the wrapped lines (pure; no CallContext).
+pub(crate) fn wrap_line(line: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![String::new()];
+    }
+    let stripped = strip_ansi(line);
+    let mut current = String::new();
+    let mut used = 0usize;
+    let mut out = Vec::new();
+    for r in stripped.chars() {
+        let w = rune_width(r);
+        if used + w > width && !current.is_empty() {
+            out.push(std::mem::take(&mut current));
+            used = 0;
+        }
+        current.push(r);
+        used += w;
+    }
+    out.push(current);
+    out
+}
+
 /// Display width of a single rune per the Go original's rules.
 pub(crate) fn rune_width(r: char) -> usize {
     let code = r as u32;

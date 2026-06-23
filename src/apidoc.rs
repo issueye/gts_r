@@ -276,6 +276,130 @@ pub fn get_all_stdlib_docs() -> HashMap<String, ModuleDoc> {
         constants: vec![],
     });
 
+    // @std/tui
+    docs.insert("@std/tui".to_string(), ModuleDoc {
+        name: "@std/tui".to_string(),
+        description: "Terminal UI: declarative node tree + flexbox layout engine (Ink-inspired)".to_string(),
+        functions: vec![
+            FunctionDoc {
+                name: "createApp".to_string(),
+                signature: "createApp(spec): app".to_string(),
+                description: "Create an app with the Elm architecture: spec.init(size)->state, spec.update(state,msg)->{state,quit}, spec.view(state,size)->nodeTree".to_string(),
+                params: vec![
+                    ParamDoc { name: "spec".to_string(), type_: "object".to_string(), description: "{ init?, update?, view?, state? }".to_string() },
+                ],
+                returns: "app - with dispatch/render/run/stop/state methods".to_string(),
+                example: Some("let app = tui.createApp({ state: 0, view: (s) => tui.text(String(s)) });\napp.run({tickMs: 120});".to_string()),
+            },
+            FunctionDoc {
+                name: "text".to_string(),
+                signature: "text(value, opts?): node".to_string(),
+                description: "Build a styled text node. opts: {color, bg, bold, dim, underline, inverse, wrap:'wrap'|'truncate'|'end'}".to_string(),
+                params: vec![
+                    ParamDoc { name: "value".to_string(), type_: "string".to_string(), description: "Text content".to_string() },
+                    ParamDoc { name: "opts".to_string(), type_: "object".to_string(), description: "Style + wrap mode".to_string() },
+                ],
+                returns: "node - a tuiNode marker".to_string(),
+                example: Some("tui.text(\"hi\", {color: \"green\", bold: true})".to_string()),
+            },
+            FunctionDoc {
+                name: "box".to_string(),
+                signature: "box(opts?): node".to_string(),
+                description: "Flexbox container. opts: {children:[node], flexDirection:'row'|'column', width, height, grow, padding, margin, border, alignItems, justifyContent, title}".to_string(),
+                params: vec![
+                    ParamDoc { name: "opts".to_string(), type_: "object".to_string(), description: "Flexbox + children".to_string() },
+                ],
+                returns: "node".to_string(),
+                example: Some("tui.box({flexDirection:\"row\", border:true, children:[tui.text(\"A\"), tui.text(\"B\")]})".to_string()),
+            },
+            FunctionDoc {
+                name: "row".to_string(),
+                signature: "row(opts?): node".to_string(),
+                description: "Shorthand for box with flexDirection: 'row'".to_string(),
+                params: vec![ ParamDoc { name: "opts".to_string(), type_: "object".to_string(), description: "{children:[node], ...flexProps}".to_string() } ],
+                returns: "node".to_string(),
+                example: Some("tui.row({children:[tui.text(\"A\"), tui.text(\"B\")]})".to_string()),
+            },
+            FunctionDoc {
+                name: "column".to_string(),
+                signature: "column(opts?): node".to_string(),
+                description: "Shorthand for box with flexDirection: 'column'".to_string(),
+                params: vec![ ParamDoc { name: "opts".to_string(), type_: "object".to_string(), description: "{children:[node], ...flexProps}".to_string() } ],
+                returns: "node".to_string(),
+                example: Some("tui.column({children:[tui.text(\"A\"), tui.text(\"B\")]})".to_string()),
+            },
+            FunctionDoc {
+                name: "input".to_string(),
+                signature: "input(opts): node".to_string(),
+                description: "Text input node with cursor. opts: {value, cursor, placeholder, prompt, focused, width}".to_string(),
+                params: vec![ ParamDoc { name: "opts".to_string(), type_: "object".to_string(), description: "Input options".to_string() } ],
+                returns: "node".to_string(),
+                example: Some("tui.input({value:\"hi\", cursor:2, focused:true})".to_string()),
+            },
+            FunctionDoc {
+                name: "list".to_string(),
+                signature: "list(opts): node".to_string(),
+                description: "Selectable list. opts: {items:[string], selected:number, focused:bool}".to_string(),
+                params: vec![ ParamDoc { name: "opts".to_string(), type_: "object".to_string(), description: "List options".to_string() } ],
+                returns: "node".to_string(),
+                example: Some("tui.list({items:[\"a\",\"b\"], selected:1})".to_string()),
+            },
+            FunctionDoc {
+                name: "table".to_string(),
+                signature: "table(opts): node".to_string(),
+                description: "Tabular data. opts: {headers:[string], rows:[[string]], columnWidths:[number]}".to_string(),
+                params: vec![ ParamDoc { name: "opts".to_string(), type_: "object".to_string(), description: "Table options".to_string() } ],
+                returns: "node".to_string(),
+                example: Some("tui.table({headers:[\"k\",\"v\"], rows:[[\"a\",\"1\"]]})".to_string()),
+            },
+            FunctionDoc {
+                name: "progress".to_string(),
+                signature: "progress(opts): node".to_string(),
+                description: "Progress bar. opts: {value:number, total:number, label:string, width:number}".to_string(),
+                params: vec![ ParamDoc { name: "opts".to_string(), type_: "object".to_string(), description: "Progress options".to_string() } ],
+                returns: "node".to_string(),
+                example: Some("tui.progress({value:50, total:100, width:20})".to_string()),
+            },
+            FunctionDoc {
+                name: "checkbox".to_string(),
+                signature: "checkbox(opts): node".to_string(),
+                description: "Checkbox. opts: {checked:bool, label:string}".to_string(),
+                params: vec![ ParamDoc { name: "opts".to_string(), type_: "object".to_string(), description: "Checkbox options".to_string() } ],
+                returns: "node".to_string(),
+                example: Some("tui.checkbox({checked:true, label:\"done\"})".to_string()),
+            },
+            FunctionDoc {
+                name: "key".to_string(),
+                signature: "key(name): msg".to_string(),
+                description: "Build a key event message {type:'key', key:name} for manual dispatch/testing".to_string(),
+                params: vec![ ParamDoc { name: "name".to_string(), type_: "string".to_string(), description: "Key name e.g. 'enter', 'ctrl+c'".to_string() } ],
+                returns: "msg".to_string(),
+                example: Some("app.dispatch(tui.key(\"enter\"))".to_string()),
+            },
+            FunctionDoc {
+                name: "tick".to_string(),
+                signature: "tick(): msg".to_string(),
+                description: "Build a tick message {type:'tick', timeMs} for manual dispatch/testing".to_string(),
+                params: vec![],
+                returns: "msg".to_string(),
+                example: Some("app.dispatch(tui.tick())".to_string()),
+            },
+            FunctionDoc {
+                name: "style".to_string(),
+                signature: "style(text, opts): string".to_string(),
+                description: "Apply ANSI styling to a string. opts: {fg/color, bg, bold, dim, underline, inverse}".to_string(),
+                params: vec![
+                    ParamDoc { name: "text".to_string(), type_: "string".to_string(), description: "Text".to_string() },
+                    ParamDoc { name: "opts".to_string(), type_: "object".to_string(), description: "Style options".to_string() },
+                ],
+                returns: "string - styled text".to_string(),
+                example: Some("tui.style(\"ok\", {color:\"green\", bold:true})".to_string()),
+            },
+        ],
+        classes: vec![],
+        constants: vec![],
+    });
+
     // @std/async
     docs.insert(
         "@std/async".to_string(),
@@ -489,6 +613,8 @@ pub fn list_all_modules() -> Vec<String> {
         "@std/cache".to_string(),
         "@std/regexp".to_string(),
         "@std/markdown".to_string(),
+        "@std/terminal".to_string(),
+        "@std/tui".to_string(),
     ]
 }
 
