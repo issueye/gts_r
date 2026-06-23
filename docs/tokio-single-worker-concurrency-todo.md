@@ -81,8 +81,8 @@
 
 ## 阶段 6：流式代理与 SSE
 
-- [ ] T6.1 新增 `http.streamAsync`
-  - 证据：返回 async reader 或 async iterator。
+- [x] T6.1 新增 `http.streamAsync`
+  - 证据：`src/stdlib/modules/net_http_client.rs` 暴露 `http.streamAsync(options)`，通过 Tokio HTTP client 在后台请求并返回 Promise；`src/async_runtime/completion.rs` 新增 `HttpStreamResponse` completion 数据，`src/object/vm.rs` 在 VM 线程 resolve 成 `{ status, statusText, headers, ok, body }`，其中 `body` 提供 `read/readText/readLine/readAll/close` stream-like API；`tests/stdlib_p8_http.rs` 新增 `http_client_stream_async_returns_stream_response` 覆盖 `await http.streamAsync(...)` 后按行读取响应体；验证：`cargo fmt --check`、`cargo test --release --test stdlib_p8_http http_client_stream_async_returns_stream_response -- --nocapture`、`cargo test --release --test stdlib_p8_http http_client_request_async_returns_promise_response -- --nocapture`、`cargo test --release --test async_completion` 通过。
 - [ ] T6.2 Web response 支持 chunked/SSE 写出
   - 证据：上游 chunk 到达后可增量写下游。
 - [ ] T6.3 流式压测
@@ -92,4 +92,4 @@
 
 ## 当前指针
 
-T6.1 新增 `http.streamAsync`。
+T6.2 Web response 支持 chunked/SSE 写出。

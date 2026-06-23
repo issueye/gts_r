@@ -46,6 +46,10 @@ pub(crate) fn http_client_module() -> Object {
             native("http.requestAsync", http_client_request_async),
         ),
         ("stream", native("http.stream", http_client_stream)),
+        (
+            "streamAsync",
+            native("http.streamAsync", http_client_stream_async),
+        ),
         ("fetch", native("http.fetch", http_client_request)),
     ])
 }
@@ -205,6 +209,43 @@ pub(crate) fn http_client_request_async(ctx: &mut CallContext, args: &[Object]) 
         std::thread::spawn(move || match perform_owned_http_request(request) {
             Ok(response) => sender.resolve(id, AsyncCompletionData::HttpResponse(response)),
             Err(e) => sender.reject(id, format!("http.requestAsync: {}", e)),
+        });
+    }
+
+    Object::Promise(promise)
+}
+
+pub(crate) fn http_client_stream_async(ctx: &mut CallContext, args: &[Object]) -> Object {
+    let request = match owned_http_request_from_args(ctx, "http.streamAsync", args) {
+        Ok(request) => request,
+        Err(err) => {
+            let promise = Promise::new();
+            promise.reject(err);
+            return Object::Promise(promise);
+        }
+    };
+
+    let vm = ctx.vm();
+    let (id, promise) = vm.create_async_completion_promise();
+    let sender = vm.async_completion_sender();
+    #[cfg(feature = "tokio")]
+    {
+        let state = http_client_state();
+        let client = state.client.clone();
+        state.runtime.spawn(async move {
+            match perform_owned_http_request_tokio(client, request).await {
+                Ok(response) => {
+                    sender.resolve(id, AsyncCompletionData::HttpStreamResponse(response))
+                }
+                Err(e) => sender.reject(id, format!("http.streamAsync: {}", e)),
+            }
+        });
+    }
+    #[cfg(not(feature = "tokio"))]
+    {
+        std::thread::spawn(move || match perform_owned_http_request(request) {
+            Ok(response) => sender.resolve(id, AsyncCompletionData::HttpStreamResponse(response)),
+            Err(e) => sender.reject(id, format!("http.streamAsync: {}", e)),
         });
     }
 

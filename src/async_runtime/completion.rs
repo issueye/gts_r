@@ -18,6 +18,7 @@ pub enum AsyncCompletionData {
     Text(String),
     Bytes(Vec<u8>),
     HttpResponse(AsyncHttpResponse),
+    HttpStreamResponse(AsyncHttpResponse),
     JsonText(String),
 }
 

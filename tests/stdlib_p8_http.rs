@@ -257,6 +257,47 @@ fn http_client_request_async_returns_promise_response() {
 }
 
 #[test]
+fn http_client_stream_async_returns_stream_response() {
+    let dir = unique_temp_dir("http_stream_async");
+    fs::create_dir_all(&dir).unwrap();
+    let url = spawn_mock_http_server("line one\nline two\n");
+    let script = format!(
+        r#"
+        const http = require("@std/http");
+        const resp = await http.streamAsync({{
+            url: "{url}",
+            method: "GET",
+            timeoutMs: 3000
+        }});
+        if (resp.status !== 200) {{
+            throw new Error("expected status 200, got " + resp.status);
+        }}
+        if (!resp.ok) {{
+            throw new Error("expected ok true");
+        }}
+        if (typeof resp.body.readLine !== "function") {{
+            throw new Error("expected stream body");
+        }}
+        const first = resp.body.readLine();
+        const rest = resp.body.readAll();
+        if (first !== "line one" || rest !== "line two\n") {{
+            throw new Error("unexpected stream chunks " + first + " / " + rest);
+        }}
+        print("stream async test passed");
+    "#
+    );
+    let out = run_script(&dir, &script);
+    fs::remove_dir_all(&dir).ok();
+    assert!(
+        out.status.success(),
+        "script failed\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("stream async test passed"));
+}
+
+#[test]
 fn http_client_request_async_reuses_keepalive_connection() {
     let dir = unique_temp_dir("http_request_async_pool");
     fs::create_dir_all(&dir).unwrap();
