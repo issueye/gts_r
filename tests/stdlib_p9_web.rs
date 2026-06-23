@@ -429,26 +429,33 @@ app.listen(port, {{count: 1}});
 }
 
 #[test]
-#[ignore = "requires async single-worker web runtime"]
 fn web_single_worker_does_not_block_fast_route_while_slow_route_waits() {
     let dir = unique_temp_dir("gts-p9-web-single-worker-async");
     fs::create_dir_all(&dir).expect("create temp dir");
-    let script = r#"
+    let upstream = spawn_delayed_http_upstream("slow", Duration::from_millis(500));
+    let script = format!(
+        r#"
 let web = require("@std/web");
-let timers = require("@std/timers");
+let http = require("@std/http");
 let app = web.createApp();
-app.get("/slow", function(req, res) {
-  timers.sleep(500);
-  res.send("slow");
-});
-app.get("/healthz", function(req, res) {
+app.get("/slow", function(req, res) {{
+  return http.requestAsync({{
+    url: "{upstream}",
+    method: "GET",
+    timeoutMs: 3000
+  }}).then(function(resp) {{
+    res.send(resp.body);
+  }});
+}});
+app.get("/healthz", function(req, res) {{
   res.send("ok");
-});
+}});
 let port = 18087;
-println(`GTS_PORT=${port}`);
+println(`GTS_PORT=${{port}}`);
 app.listen(port);
-"#;
-    let (mut child, port) = spawn_server_script(&dir, script);
+"#
+    );
+    let (mut child, port) = spawn_server_script(&dir, &script);
     std::thread::sleep(Duration::from_millis(100));
 
     let slow = std::thread::spawn(move || {

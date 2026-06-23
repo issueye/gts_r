@@ -69,6 +69,12 @@ struct WebApp {
     shutdown_signal: std::cell::RefCell<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WebRequestOutcome {
+    Responded,
+    Pending,
+}
+
 pub(crate) const WEB_APP_STATE_KEY: &str = "__web_app__";
 
 pub(crate) fn web_module() -> Object {
@@ -330,15 +336,22 @@ fn web_listen_serial(
 ) {
     let infinite = count == usize::MAX;
     let mut served: usize = 0;
+    let pending_responses = Rc::new(Cell::new(0usize));
     loop {
         if !infinite && served >= count {
-            break;
+            if pending_responses.get() == 0 {
+                break;
+            }
+            ctx.vm().wait_async();
+            ctx.vm().drain_async_completions();
+            continue;
         }
         if let Some(flag) = shutdown.as_ref() {
             if flag.load(std::sync::atomic::Ordering::Relaxed) {
                 break;
             }
         }
+        ctx.vm().drain_async_completions();
         let request = {
             let guard = app.server.borrow();
             let srv = match guard.as_ref() {
@@ -349,16 +362,21 @@ fn web_listen_serial(
             let timeout = std::time::Duration::from_millis(100);
             match srv.recv_timeout(timeout) {
                 Ok(Some(r)) => r,
-                Ok(None) => continue, // timed out, loop and re-check shutdown
-                Err(_) => continue,   // transient; keep serving
+                Ok(None) => {
+                    ctx.vm().drain_async_completions();
+                    continue;
+                }
+                Err(_) => {
+                    ctx.vm().drain_async_completions();
+                    continue;
+                }
             }
         };
-        // web_handle_request owns the request so it can call respond() by value.
-        if let Err(_e) = web_handle_request(ctx, app, request) {
-            // Handler threw — we already responded with 500 inside the helper
-            // when possible; surface the message for the test/log layer.
+        match web_handle_request(ctx, app, request, Some(pending_responses.clone())) {
+            Ok(WebRequestOutcome::Responded) => served += 1,
+            Ok(WebRequestOutcome::Pending) => served += 1,
+            Err(_e) => served += 1,
         }
-        served += 1;
     }
 }
 
@@ -386,12 +404,16 @@ fn web_listen_worker(ctx: &mut CallContext, app: &Rc<WebApp>) -> Object {
         if wctx.shutdown.load(std::sync::atomic::Ordering::Relaxed) {
             break;
         }
+        ctx.vm().drain_async_completions();
         let request = match wctx.server.recv_timeout(timeout) {
             Ok(Some(r)) => r,
-            Ok(None) => continue, // timed out; re-check shutdown
-            Err(_) => break,      // listener gone
+            Ok(None) => {
+                ctx.vm().drain_async_completions();
+                continue;
+            }
+            Err(_) => break, // listener gone
         };
-        if let Err(_e) = web_handle_request(ctx, app, request) {
+        if let Err(_e) = web_handle_request(ctx, app, request, None) {
             // Handler threw; web_handle_request already responded 500.
         }
     }
@@ -506,7 +528,8 @@ fn web_handle_request(
     ctx: &mut CallContext,
     app: &Rc<WebApp>,
     mut request: tiny_http::Request,
-) -> Result<(), String> {
+    pending_responses: Option<Rc<Cell<usize>>>,
+) -> Result<WebRequestOutcome, String> {
     let method = request.method().as_str().to_ascii_uppercase();
     let url = request.url().to_string();
     let path = url.split('?').next().unwrap_or(&url).to_string();
@@ -566,6 +589,7 @@ fn web_handle_request(
         .set("headers", Object::Hash(headers_obj.clone()));
     let res_obj = http_response_object(resp_state.clone());
     let req_segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let mut request_slot = Some(request);
 
     // Collect the chain of handlers to invoke, in route-registration order.
     let routes = app.routes.borrow();
@@ -633,9 +657,25 @@ fn web_handle_request(
                 err = Some(result.inspect());
                 break;
             }
-            if let Some(msg) = web_wait_handler_promise(ctx, &result) {
-                err = Some(msg);
-                break;
+            match web_handle_handler_promise(ctx, &result, resp_state.clone(), &mut request_slot) {
+                WebPromiseOutcome::NotPromise => {}
+                WebPromiseOutcome::Rejected(msg) => {
+                    err = Some(msg);
+                    break;
+                }
+                WebPromiseOutcome::Pending => {
+                    if let Some(counter) = pending_responses.as_ref() {
+                        counter.set(counter.get() + 1);
+                        let counter_for_completion = counter.clone();
+                        if let Object::Promise(promise) = result {
+                            promise.add_continuation(Box::new(move |_state, _value| {
+                                counter_for_completion
+                                    .set(counter_for_completion.get().saturating_sub(1));
+                            }));
+                        }
+                    }
+                    return Ok(WebRequestOutcome::Pending);
+                }
             }
             if resp_state.borrow().body.is_some() {
                 break;
@@ -652,7 +692,59 @@ fn web_handle_request(
         g.body = Some(format!("Internal Server Error: {}", msg).into_bytes());
     }
 
-    // Build the response and respond by value.
+    if let Some(request) = request_slot.take() {
+        web_respond(request, &resp_state);
+    }
+    Ok(WebRequestOutcome::Responded)
+}
+
+enum WebPromiseOutcome {
+    NotPromise,
+    Pending,
+    Rejected(String),
+}
+
+fn web_handle_handler_promise(
+    _ctx: &mut CallContext,
+    result: &Object,
+    resp_state: Rc<RefCell<HttpResponseState>>,
+    request: &mut Option<tiny_http::Request>,
+) -> WebPromiseOutcome {
+    let Object::Promise(promise) = result else {
+        return WebPromiseOutcome::NotPromise;
+    };
+    match promise.state() {
+        PromiseState::Pending => {
+            let Some(request) = request.take() else {
+                return WebPromiseOutcome::Rejected("web response already consumed".to_string());
+            };
+            promise.add_continuation(Box::new(move |state, value| {
+                if state == PromiseState::Rejected || value.is_runtime_error() {
+                    let mut g = resp_state.borrow_mut();
+                    g.status = Some(500);
+                    g.content_type = Some("text/plain".to_string());
+                    g.body =
+                        Some(format!("Internal Server Error: {}", value.inspect()).into_bytes());
+                }
+                web_respond(request, &resp_state);
+            }));
+            WebPromiseOutcome::Pending
+        }
+        PromiseState::Rejected => {
+            WebPromiseOutcome::Rejected(promise.value().unwrap_or(Object::Undefined).inspect())
+        }
+        PromiseState::Fulfilled => {
+            let value = promise.value().unwrap_or(Object::Undefined);
+            if value.is_runtime_error() {
+                WebPromiseOutcome::Rejected(value.inspect())
+            } else {
+                WebPromiseOutcome::NotPromise
+            }
+        }
+    }
+}
+
+fn web_respond(request: tiny_http::Request, resp_state: &Rc<RefCell<HttpResponseState>>) {
     let state = resp_state.borrow();
     let status_code = state.status.unwrap_or(200);
     let body_bytes = state.body.clone().unwrap_or_default();
@@ -670,33 +762,11 @@ fn web_handle_request(
             response = response.with_header(h);
         }
     }
-    // Always close the connection after responding. This matches the
-    // `Connection: close` requests our clients send and lets long-running
-    // worker servers release each socket promptly (otherwise keep-alive holds
-    // the stream open and clients waiting on EOF would hang).
     if let Ok(h) = tiny_http::Header::from_bytes(&b"Connection"[..], &b"close"[..]) {
         response = response.with_header(h);
     }
     drop(state);
     let _ = request.respond(response);
-    Ok(())
-}
-
-fn web_wait_handler_promise(ctx: &mut CallContext, result: &Object) -> Option<String> {
-    let Object::Promise(promise) = result else {
-        return None;
-    };
-    if promise.state() == PromiseState::Pending {
-        ctx.vm().wait_async();
-    }
-    let value = promise.wait();
-    if promise.state() == PromiseState::Rejected {
-        Some(value.inspect())
-    } else if value.is_runtime_error() {
-        Some(value.inspect())
-    } else {
-        None
-    }
 }
 
 fn web_handler_prefers_express_args(handler: &Object) -> bool {

@@ -20,7 +20,10 @@ struct PromiseInner {
     state: PromiseState,
     value: Option<Object>,
     wakers: WakerRegistry,
+    continuations: Vec<PromiseContinuation>,
 }
+
+pub type PromiseContinuation = Box<dyn FnOnce(PromiseState, Object) + 'static>;
 
 /// A Promise value.
 pub struct Promise {
@@ -34,6 +37,7 @@ impl Promise {
                 state: PromiseState::Pending,
                 value: None,
                 wakers: WakerRegistry::new(),
+                continuations: Vec::new(),
             }),
         })
     }
@@ -43,29 +47,39 @@ impl Promise {
     }
 
     pub fn resolve(&self, value: Object) {
-        let mut g = self.inner.borrow_mut();
-        if g.state != PromiseState::Pending {
-            return;
-        }
-        g.state = PromiseState::Fulfilled;
-        g.value = Some(value);
-        // Wake all tasks waiting on this promise
-        let wakers = std::mem::replace(&mut g.wakers, WakerRegistry::new());
-        drop(g); // Release borrow before calling wakers
-        wakers.wake_all();
+        self.settle(PromiseState::Fulfilled, value);
     }
 
     pub fn reject(&self, reason: Object) {
+        self.settle(PromiseState::Rejected, reason);
+    }
+
+    fn settle(&self, state: PromiseState, value: Object) {
         let mut g = self.inner.borrow_mut();
         if g.state != PromiseState::Pending {
             return;
         }
-        g.state = PromiseState::Rejected;
-        g.value = Some(reason);
-        // Wake all tasks waiting on this promise
+        g.state = state;
+        g.value = Some(value.clone());
         let wakers = std::mem::replace(&mut g.wakers, WakerRegistry::new());
-        drop(g); // Release borrow before calling wakers
+        let continuations = std::mem::take(&mut g.continuations);
+        drop(g);
         wakers.wake_all();
+        for continuation in continuations {
+            continuation(state, value.clone());
+        }
+    }
+
+    pub fn add_continuation(&self, continuation: PromiseContinuation) {
+        let mut g = self.inner.borrow_mut();
+        if g.state == PromiseState::Pending {
+            g.continuations.push(continuation);
+            return;
+        }
+        let state = g.state;
+        let value = g.value.clone().unwrap_or(Object::Undefined);
+        drop(g);
+        continuation(state, value);
     }
 
     /// Block until settled, returning the resolution value or rejection reason.

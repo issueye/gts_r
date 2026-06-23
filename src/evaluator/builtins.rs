@@ -2323,31 +2323,25 @@ fn prom_then(ctx: &mut CallContext, args: &[Object]) -> Object {
     };
     let on_fulfilled = args.first().cloned();
     let next = Promise::new();
-    // Single-threaded: wait for the source inline, then run the continuation.
-    let result = wait_promise_with_vm(ctx, &p);
-    if p.state() == PromiseState::Rejected {
-        next.reject(result);
-        return Object::Promise(next);
-    }
-    match on_fulfilled {
-        Some(f) => {
-            let r = apply_function(&f, ctx.env, &[result], None, ctx.pos.clone());
-            match r {
-                Object::Promise(np) => {
-                    let nr = wait_promise_with_vm(ctx, &np);
-                    if np.state() == PromiseState::Rejected {
-                        next.reject(nr);
-                    } else {
-                        next.resolve(nr);
-                    }
-                }
-                other => next.resolve(other),
-            }
+    let env = ctx.env.clone();
+    let pos = ctx.pos.clone();
+    let next_for_continuation = next.clone();
+    p.add_continuation(Box::new(move |state, result| {
+        if state == PromiseState::Rejected {
+            next_for_continuation.reject(result);
+            return;
         }
-        None => next.resolve(result),
-    }
+        match &on_fulfilled {
+            Some(f) => {
+                let r = apply_function(f, &env, &[result], None, pos.clone());
+                resolve_chained_promise(&next_for_continuation, r);
+            }
+            None => next_for_continuation.resolve(result),
+        }
+    }));
     Object::Promise(next)
 }
+
 fn prom_catch(ctx: &mut CallContext, args: &[Object]) -> Object {
     let p = match active_promise(ctx) {
         Some(p) => p,
@@ -2355,18 +2349,22 @@ fn prom_catch(ctx: &mut CallContext, args: &[Object]) -> Object {
     };
     let on_reject = args.first().cloned();
     let next = Promise::new();
-    let result = wait_promise_with_vm(ctx, &p);
-    if p.state() == PromiseState::Fulfilled {
-        next.resolve(result);
-        return Object::Promise(next);
-    }
-    match on_reject {
-        Some(f) => {
-            let r = apply_function(&f, ctx.env, &[result], None, ctx.pos.clone());
-            next.resolve(r);
+    let env = ctx.env.clone();
+    let pos = ctx.pos.clone();
+    let next_for_continuation = next.clone();
+    p.add_continuation(Box::new(move |state, result| {
+        if state == PromiseState::Fulfilled {
+            next_for_continuation.resolve(result);
+            return;
         }
-        None => next.reject(result),
-    }
+        match &on_reject {
+            Some(f) => {
+                let r = apply_function(f, &env, &[result], None, pos.clone());
+                resolve_chained_promise(&next_for_continuation, r);
+            }
+            None => next_for_continuation.reject(result),
+        }
+    }));
     Object::Promise(next)
 }
 
@@ -2377,29 +2375,41 @@ fn prom_finally(ctx: &mut CallContext, args: &[Object]) -> Object {
     };
     let on_finally = args.first().cloned();
     let next = Promise::new();
-    let result = wait_promise_with_vm(ctx, &p);
-    let state = p.state();
-
-    // Execute the finally handler if provided
-    if let Some(f) = on_finally {
-        let _ = apply_function(&f, ctx.env, &[], None, ctx.pos.clone());
-    }
-
-    // Forward the original result/rejection
-    if state == PromiseState::Rejected {
-        next.reject(result);
-    } else {
-        next.resolve(result);
-    }
-
+    let env = ctx.env.clone();
+    let pos = ctx.pos.clone();
+    let next_for_continuation = next.clone();
+    p.add_continuation(Box::new(move |state, result| {
+        if let Some(f) = &on_finally {
+            let r = apply_function(f, &env, &[], None, pos.clone());
+            if r.is_runtime_error() {
+                next_for_continuation.reject(r);
+                return;
+            }
+        }
+        if state == PromiseState::Rejected {
+            next_for_continuation.reject(result);
+        } else {
+            next_for_continuation.resolve(result);
+        }
+    }));
     Object::Promise(next)
 }
 
-fn wait_promise_with_vm(ctx: &CallContext, promise: &Rc<Promise>) -> Object {
-    if promise.state() == PromiseState::Pending {
-        ctx.vm().wait_async();
+fn resolve_chained_promise(next: &Rc<Promise>, result: Object) {
+    match result {
+        Object::Promise(promise) => {
+            let next = next.clone();
+            promise.add_continuation(Box::new(move |state, value| {
+                if state == PromiseState::Rejected {
+                    next.reject(value);
+                } else {
+                    next.resolve(value);
+                }
+            }));
+        }
+        other if other.is_runtime_error() => next.reject(other),
+        other => next.resolve(other),
     }
-    promise.wait()
 }
 
 // Map methods
