@@ -12,7 +12,7 @@
 use crate::ast::{Position, TypeAnnotation, TypeKind};
 use crate::object::{
     new_error, new_named_error, str_obj, ArrayData, CallContext, EnvRef, HashData, Object,
-    PromiseState,
+    PromiseState, VirtualMachine,
 };
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -25,6 +25,14 @@ use super::opcode::Opcode;
 use super::upvalue::Upvalue;
 use crate::evaluator::builtins::register_globals;
 use crate::evaluator::expressions::{apply_binary_op, apply_unary_op};
+
+/// How many bytecode instructions to execute between deadline checks.
+///
+/// Checking `vm.check_timeout()` on every instruction adds noticeable overhead
+/// to tight loops; sampling every Nth instruction keeps the cost negligible
+/// while still terminating an infinite loop promptly (the deadline is
+/// wall-clock based, so a hot loop reaches the next check within N steps).
+const TIMEOUT_CHECK_INTERVAL: u64 = 4096;
 
 /// Execute a compiled chunk under the given (root) environment. The
 /// environment holds the global name table; variable lookups route through it.
@@ -49,7 +57,7 @@ pub(crate) fn interpret_with_upvalues(
     if !vm.has_global("println") {
         register_globals(&vm);
     }
-    let mut state = VmState::new(chunk, env.clone(), upvalues);
+    let mut state = VmState::new(chunk, env.clone(), upvalues, vm);
     state.run()
 }
 
@@ -61,10 +69,19 @@ struct VmState<'a> {
     env: EnvRef,
     open_upvalues: BTreeMap<usize, Vec<Rc<Upvalue>>>,
     current_upvalues: Vec<Rc<Upvalue>>,
+    /// VM handle, used to sample the execution deadline (see `run`).
+    vm: Rc<VirtualMachine>,
+    /// Instructions executed since the last deadline check.
+    instruction_count: u64,
 }
 
 impl<'a> VmState<'a> {
-    fn new(chunk: &'a Chunk, env: EnvRef, current_upvalues: Vec<Rc<Upvalue>>) -> Self {
+    fn new(
+        chunk: &'a Chunk,
+        env: EnvRef,
+        current_upvalues: Vec<Rc<Upvalue>>,
+        vm: Rc<VirtualMachine>,
+    ) -> Self {
         VmState {
             chunk,
             ip: 0,
@@ -73,6 +90,8 @@ impl<'a> VmState<'a> {
             env,
             open_upvalues: BTreeMap::new(),
             current_upvalues,
+            vm,
+            instruction_count: 0,
         }
     }
 
@@ -84,6 +103,16 @@ impl<'a> VmState<'a> {
                     Position::default(),
                     "VMError: ran off the end of bytecode without RETURN",
                 );
+            }
+            // Sample the execution deadline periodically so `--timeout` can
+            // interrupt tight CPU loops. Mirrors the per-statement check the
+            // tree-walker performs in `evaluator::eval_core`.
+            self.instruction_count = self.instruction_count.wrapping_add(1);
+            if self.instruction_count % TIMEOUT_CHECK_INTERVAL == 0 {
+                let ip = self.ip;
+                if let Some(timeout) = self.vm.check_timeout(self.chunk.position_at(ip)) {
+                    return timeout;
+                }
             }
             match self.step() {
                 Ok(Flow::Continue) => {}
@@ -1423,8 +1452,8 @@ mod tests {
     fn state_for_upvalue_tests() -> VmState<'static> {
         let chunk = Box::leak(Box::new(Chunk::new()));
         let vm = VirtualMachine::new();
-        let env = Environment::new_root(vm);
-        VmState::new(chunk, env, Vec::new())
+        let env = Environment::new_root(vm.clone());
+        VmState::new(chunk, env, Vec::new(), vm)
     }
 
     #[test]
