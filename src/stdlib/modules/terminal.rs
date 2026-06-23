@@ -84,16 +84,7 @@ pub(crate) fn terminal_is_tty(_ctx: &mut CallContext, args: &[Object]) -> Object
 }
 
 pub(crate) fn terminal_size(_ctx: &mut CallContext, _args: &[Object]) -> Object {
-    let cols = env::var("COLUMNS")
-        .ok()
-        .and_then(|v| v.parse::<i64>().ok())
-        .filter(|v| *v > 0)
-        .unwrap_or(80);
-    let rows = env::var("LINES")
-        .ok()
-        .and_then(|v| v.parse::<i64>().ok())
-        .filter(|v| *v > 0)
-        .unwrap_or(24);
+    let (cols, rows) = terminal_dimensions();
     module(vec![
         ("cols", num_obj(cols as f64)),
         ("rows", num_obj(rows as f64)),
@@ -272,26 +263,43 @@ pub(crate) fn terminal_hyperlink(ctx: &mut CallContext, args: &[Object]) -> Obje
 // ---------------------------------------------------------------------------
 
 pub(crate) fn terminal_size_object() -> Object {
+    let (cols, rows) = terminal_dimensions();
     let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut()
-        .set("cols", num_obj(terminal_cols() as f64));
-    hash.borrow_mut()
-        .set("rows", num_obj(terminal_rows() as f64));
+    hash.borrow_mut().set("cols", num_obj(cols as f64));
+    hash.borrow_mut().set("rows", num_obj(rows as f64));
     Object::Hash(hash)
 }
 
 pub(crate) fn terminal_cols() -> i32 {
-    env::var("COLUMNS")
-        .ok()
-        .and_then(|v| v.parse::<i32>().ok())
-        .filter(|v| *v > 0)
-        .unwrap_or(80)
+    terminal_dimensions().0
 }
 
 pub(crate) fn terminal_rows() -> i32 {
-    env::var("LINES")
+    terminal_dimensions().1
+}
+
+fn terminal_dimensions() -> (i32, i32) {
+    let cols = env::var("COLUMNS")
         .ok()
         .and_then(|v| v.parse::<i32>().ok())
-        .filter(|v| *v > 0)
-        .unwrap_or(24)
+        .filter(|v| *v > 0);
+    let rows = env::var("LINES")
+        .ok()
+        .and_then(|v| v.parse::<i32>().ok())
+        .filter(|v| *v > 0);
+
+    if let (Some(cols), Some(rows)) = (cols, rows) {
+        return (cols, rows);
+    }
+
+    if let Ok((actual_cols, actual_rows)) = crossterm::terminal::size() {
+        if actual_cols > 0 && actual_rows > 0 {
+            return (
+                cols.unwrap_or(actual_cols as i32),
+                rows.unwrap_or(actual_rows as i32),
+            );
+        }
+    }
+
+    (cols.unwrap_or(80), rows.unwrap_or(24))
 }
