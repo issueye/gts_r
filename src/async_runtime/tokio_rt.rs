@@ -22,9 +22,6 @@ use std::future::Future;
 #[cfg(feature = "tokio")]
 use tokio::runtime::{Builder, Runtime};
 
-#[cfg(feature = "tokio")]
-use crate::object::PollResult;
-
 /// Tokio runtime wrapper for GTS
 ///
 /// This provides a multi-threaded async runtime powered by tokio.
@@ -88,32 +85,6 @@ impl TokioRuntime {
 impl Default for TokioRuntime {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Bridge from GTS PollResult to tokio-compatible result
-///
-/// This allows passing results across thread boundaries safely.
-#[cfg(feature = "tokio")]
-#[derive(Debug, Clone)]
-pub enum BridgedResult {
-    /// Success with a serialized value representation
-    Ready(String),
-    /// Error with error message
-    Rejected(String),
-    /// Still pending
-    Pending,
-}
-
-#[cfg(feature = "tokio")]
-impl BridgedResult {
-    /// Convert from PollResult (requires serialization)
-    pub fn from_poll_result(result: &PollResult) -> Self {
-        match result {
-            PollResult::Ready(obj) => BridgedResult::Ready(obj.inspect()),
-            PollResult::Rejected(err) => BridgedResult::Rejected(err.inspect()),
-            PollResult::Pending => BridgedResult::Pending,
-        }
     }
 }
 

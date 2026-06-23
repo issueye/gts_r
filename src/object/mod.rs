@@ -1,7 +1,6 @@
 //! Runtime object system: values, environments, the virtual machine, and
 //! promises.
 
-mod awaitable;
 mod environment;
 mod promise;
 mod value;
@@ -11,7 +10,6 @@ pub use crate::async_runtime::{
     AsyncCompletion, AsyncCompletionData, AsyncCompletionId, AsyncCompletionResult,
     AsyncCompletionSender, AsyncHttpResponse,
 };
-pub use awaitable::{Awaitable, PollResult, Waker, WakerRegistry};
 pub use environment::{Binding, Environment};
 pub use promise::{Promise, PromiseState};
 pub use value::{
