@@ -438,24 +438,7 @@ fn async_http_response_from_ureq(
 }
 
 fn async_http_response_to_object(response: AsyncHttpResponse) -> Object {
-    let headers = Rc::new(RefCell::new(HashData::default()));
-    for (name, value) in response.headers {
-        headers.borrow_mut().set(name, str_obj(value));
-    }
-    let body = String::from_utf8_lossy(&response.body).into_owned();
-    let hash = Rc::new(RefCell::new(HashData::default()));
-    hash.borrow_mut()
-        .set("status", num_obj(response.status as f64));
-    hash.borrow_mut()
-        .set("statusText", str_obj(response.status_text));
-    hash.borrow_mut().set("headers", Object::Hash(headers));
-    hash.borrow_mut().set("body", str_obj(body));
-    hash.borrow_mut().set(
-        "ok",
-        bool_obj(response.status >= 200 && response.status < 300),
-    );
-
-    Object::Hash(hash)
+    crate::object::http_stream::http_response_to_object(response)
 }
 
 pub(crate) fn http_client_stream(ctx: &mut CallContext, args: &[Object]) -> Object {

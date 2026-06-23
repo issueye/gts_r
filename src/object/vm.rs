@@ -11,13 +11,11 @@ use std::time::{Duration, Instant};
 use crate::ast::Position;
 use crate::async_runtime::{
     AsyncCompletion, AsyncCompletionData, AsyncCompletionId, AsyncCompletionQueue,
-    AsyncCompletionResult, AsyncCompletionSender, AsyncHttpResponse,
+    AsyncCompletionResult, AsyncCompletionSender,
 };
 
 use super::promise::Promise;
-use super::value::{
-    bool_obj, new_error, num_obj, str_obj, ArrayData, Builtin, CallContext, HashData, Object,
-};
+use super::value::{new_error, Object};
 
 /// The evaluator callback type. Given an AST node and an environment, produce a
 /// value. Stored on the VM so runtime objects (closures, Promise continuations)
@@ -190,7 +188,9 @@ impl VirtualMachine {
             if let Some(promise) = self.async_promises.borrow_mut().remove(&completion.id) {
                 match &completion.result {
                     AsyncCompletionResult::Resolve(data) => {
-                        promise.resolve(async_completion_data_to_object(data.clone()));
+                        promise.resolve(crate::object::http_stream::async_completion_data_to_object(
+                            data.clone(),
+                        ));
                     }
                     AsyncCompletionResult::Reject(error) => {
                         promise.reject(new_error(Position::default(), error.clone()));
@@ -247,223 +247,4 @@ impl VirtualMachine {
 /// Helper to create an error positioned at the given call site.
 pub fn vm_error(pos: Position, msg: impl Into<String>) -> Object {
     new_error(pos, msg)
-}
-
-fn async_completion_data_to_object(data: AsyncCompletionData) -> Object {
-    match data {
-        AsyncCompletionData::Undefined => Object::Undefined,
-        AsyncCompletionData::Text(text) | AsyncCompletionData::JsonText(text) => str_obj(text),
-        AsyncCompletionData::Bytes(bytes) => Object::Array(Rc::new(RefCell::new(ArrayData {
-            elements: bytes.into_iter().map(|byte| num_obj(byte as f64)).collect(),
-        }))),
-        AsyncCompletionData::HttpResponse(response) => async_http_response_to_object(response),
-        AsyncCompletionData::HttpStreamResponse(response) => {
-            async_http_stream_response_to_object(response)
-        }
-    }
-}
-
-fn async_http_response_to_object(response: AsyncHttpResponse) -> Object {
-    let headers = Rc::new(RefCell::new(HashData::default()));
-    for (name, value) in response.headers {
-        headers.borrow_mut().set(name, str_obj(value));
-    }
-
-    let body = String::from_utf8_lossy(&response.body).into_owned();
-    let obj = Rc::new(RefCell::new(HashData::default()));
-    obj.borrow_mut()
-        .set("status", num_obj(response.status as f64));
-    obj.borrow_mut()
-        .set("statusText", str_obj(response.status_text));
-    obj.borrow_mut().set("headers", Object::Hash(headers));
-    obj.borrow_mut().set("body", str_obj(body));
-    obj.borrow_mut()
-        .set("ok", bool_obj((200..300).contains(&response.status)));
-    Object::Hash(obj)
-}
-
-fn async_http_stream_response_to_object(response: AsyncHttpResponse) -> Object {
-    let headers = Rc::new(RefCell::new(HashData::default()));
-    for (name, value) in response.headers {
-        headers.borrow_mut().set(name, str_obj(value));
-    }
-
-    let body = String::from_utf8_lossy(&response.body).into_owned();
-    let obj = Rc::new(RefCell::new(HashData::default()));
-    obj.borrow_mut()
-        .set("status", num_obj(response.status as f64));
-    obj.borrow_mut()
-        .set("statusText", str_obj(response.status_text));
-    obj.borrow_mut().set("headers", Object::Hash(headers));
-    obj.borrow_mut()
-        .set("body", completion_stream_from_text(body));
-    obj.borrow_mut()
-        .set("ok", bool_obj((200..300).contains(&response.status)));
-    obj.borrow_mut().set(
-        "close",
-        Object::Builtin(Rc::new(Builtin {
-            name: "http.streamAsync.close".to_string(),
-            func: Rc::new(|_ctx, _args| Object::Undefined),
-            extra: None,
-        })),
-    );
-    Object::Hash(obj)
-}
-
-struct CompletionStreamState {
-    text: String,
-    pos: usize,
-    closed: bool,
-}
-
-fn completion_stream_from_text(text: String) -> Object {
-    let state = Rc::new(RefCell::new(CompletionStreamState {
-        text: text.clone(),
-        pos: 0,
-        closed: false,
-    }));
-    let stream = Rc::new(RefCell::new(HashData::default()));
-    stream.borrow_mut().set("text", str_obj(text));
-
-    let s = state.clone();
-    stream.borrow_mut().set(
-        "read",
-        Object::Builtin(Rc::new(Builtin {
-            name: "http.streamAsync.body.read".to_string(),
-            func: Rc::new(move |ctx, args| completion_stream_read(ctx, args, &s)),
-            extra: None,
-        })),
-    );
-
-    let s = state.clone();
-    stream.borrow_mut().set(
-        "readText",
-        Object::Builtin(Rc::new(Builtin {
-            name: "http.streamAsync.body.readText".to_string(),
-            func: Rc::new(move |ctx, args| completion_stream_read_text(ctx, args, &s)),
-            extra: None,
-        })),
-    );
-
-    let s = state.clone();
-    stream.borrow_mut().set(
-        "readLine",
-        Object::Builtin(Rc::new(Builtin {
-            name: "http.streamAsync.body.readLine".to_string(),
-            func: Rc::new(move |_ctx, _args| completion_stream_read_line(&s)),
-            extra: None,
-        })),
-    );
-
-    let s = state.clone();
-    stream.borrow_mut().set(
-        "readAll",
-        Object::Builtin(Rc::new(Builtin {
-            name: "http.streamAsync.body.readAll".to_string(),
-            func: Rc::new(move |_ctx, _args| completion_stream_read_all(&s)),
-            extra: None,
-        })),
-    );
-
-    let s = state.clone();
-    stream.borrow_mut().set(
-        "close",
-        Object::Builtin(Rc::new(Builtin {
-            name: "http.streamAsync.body.close".to_string(),
-            func: Rc::new(move |_ctx, _args| {
-                s.borrow_mut().closed = true;
-                Object::Undefined
-            }),
-            extra: None,
-        })),
-    );
-
-    Object::Hash(stream)
-}
-
-fn completion_stream_size(
-    ctx: &CallContext<'_>,
-    name: &str,
-    args: &[Object],
-) -> Result<usize, Object> {
-    match args.first() {
-        Some(Object::Number(n)) if *n > 0.0 => Ok(*n as usize),
-        Some(Object::Number(_)) => Err(new_error(
-            ctx.pos.clone(),
-            format!("{name}: size must be positive"),
-        )),
-        Some(_) => Err(new_error(
-            ctx.pos.clone(),
-            format!("{name}: size must be a number"),
-        )),
-        None => Ok(8192),
-    }
-}
-
-fn completion_stream_read(
-    ctx: &mut CallContext<'_>,
-    args: &[Object],
-    state: &Rc<RefCell<CompletionStreamState>>,
-) -> Object {
-    let size = match completion_stream_size(ctx, "stream.read", args) {
-        Ok(size) => size,
-        Err(err) => return err,
-    };
-    let mut s = state.borrow_mut();
-    if s.closed || s.pos >= s.text.len() {
-        return Object::Null;
-    }
-    let end = (s.pos + size).min(s.text.len());
-    let bytes = s.text.as_bytes()[s.pos..end].to_vec();
-    s.pos = end;
-    Object::Array(Rc::new(RefCell::new(ArrayData {
-        elements: bytes.into_iter().map(|byte| num_obj(byte as f64)).collect(),
-    })))
-}
-
-fn completion_stream_read_text(
-    ctx: &mut CallContext<'_>,
-    args: &[Object],
-    state: &Rc<RefCell<CompletionStreamState>>,
-) -> Object {
-    let size = match completion_stream_size(ctx, "stream.readText", args) {
-        Ok(size) => size,
-        Err(err) => return err,
-    };
-    let mut s = state.borrow_mut();
-    if s.closed || s.pos >= s.text.len() {
-        return Object::Null;
-    }
-    let end = (s.pos + size).min(s.text.len());
-    let chunk = s.text[s.pos..end].to_string();
-    s.pos = end;
-    str_obj(chunk)
-}
-
-fn completion_stream_read_line(state: &Rc<RefCell<CompletionStreamState>>) -> Object {
-    let mut s = state.borrow_mut();
-    if s.closed || s.pos >= s.text.len() {
-        return Object::Null;
-    }
-    let rest = &s.text[s.pos..];
-    match rest.find('\n') {
-        Some(idx) => {
-            let line = rest[..idx].trim_end_matches('\r').to_string();
-            s.pos += idx + 1;
-            str_obj(line)
-        }
-        None => {
-            let line = rest.trim_end_matches('\r').to_string();
-            s.pos = s.text.len();
-            str_obj(line)
-        }
-    }
-}
-
-fn completion_stream_read_all(state: &Rc<RefCell<CompletionStreamState>>) -> Object {
-    let s = state.borrow();
-    if s.closed || s.pos >= s.text.len() {
-        return str_obj(String::new());
-    }
-    str_obj(s.text[s.pos..].to_string())
 }

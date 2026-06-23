@@ -2,6 +2,7 @@
 //! promises.
 
 mod environment;
+pub(crate) mod http_stream;
 mod promise;
 mod value;
 mod vm;
