@@ -757,7 +757,9 @@ pub(crate) fn tui_frame_text(value: &Object) -> String {
 
 pub(crate) fn tui_hash_function(hash: &HashData, key: &str) -> Option<Object> {
     match hash.get(key) {
-        Some(Object::Function(_) | Object::Builtin(_)) => hash.get(key).cloned(),
+        Some(Object::Function(_) | Object::Builtin(_) | Object::Closure(_)) => {
+            hash.get(key).cloned()
+        }
         _ => None,
     }
 }

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::{Read, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf, MAIN_SEPARATOR, MAIN_SEPARATOR_STR};
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -65,8 +65,17 @@ pub(crate) fn terminal_module() -> Object {
     ])
 }
 
-pub(crate) fn terminal_is_tty(_ctx: &mut CallContext, _args: &[Object]) -> Object {
-    bool_obj(false)
+pub(crate) fn terminal_is_tty(_ctx: &mut CallContext, args: &[Object]) -> Object {
+    let stream = match args.first() {
+        Some(Object::String(value)) => value.to_ascii_lowercase(),
+        _ => "stdout".to_string(),
+    };
+    let interactive = match stream.as_str() {
+        "stdin" | "in" => std::io::stdin().is_terminal(),
+        "stderr" | "err" => std::io::stderr().is_terminal(),
+        _ => std::io::stdout().is_terminal(),
+    };
+    bool_obj(interactive)
 }
 
 pub(crate) fn terminal_size(_ctx: &mut CallContext, _args: &[Object]) -> Object {
