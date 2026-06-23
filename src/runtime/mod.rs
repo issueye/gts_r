@@ -51,8 +51,6 @@ pub struct Session {
     root: crate::object::EnvRef,
     module_cache: Rc<ModuleCache>,
     resolver: Rc<Resolver>,
-    #[cfg(feature = "tokio")]
-    tokio_runtime: Option<crate::async_runtime::tokio_rt::TokioRuntime>,
 }
 
 impl Session {
@@ -72,24 +70,10 @@ impl Session {
             root,
             module_cache,
             resolver,
-            #[cfg(feature = "tokio")]
-            tokio_runtime: Some(crate::async_runtime::tokio_rt::TokioRuntime::new()),
         };
         session.install_host_globals();
         session.install_importer();
         session
-    }
-
-    /// Check if tokio runtime is enabled
-    #[cfg(feature = "tokio")]
-    pub fn has_tokio(&self) -> bool {
-        self.tokio_runtime.is_some()
-    }
-
-    /// Get a reference to the tokio runtime, if available
-    #[cfg(feature = "tokio")]
-    pub fn tokio_runtime(&self) -> Option<&crate::async_runtime::tokio_rt::TokioRuntime> {
-        self.tokio_runtime.as_ref()
     }
 
     /// Access the underlying VM.

@@ -1,39 +1,27 @@
-/// Async runtime abstraction for event loop execution
+/// Async runtime: completion-queue coordination between the single-threaded
+/// VM and background workers.
 ///
-/// This module documents the async runtime architecture and provides utilities
-/// for future tokio integration. The current implementation uses a single-threaded
-/// poll-based EventLoop with Rc/RefCell semantics.
+/// ## Architecture
 ///
-/// ## Current Architecture (Native)
+/// Async work is resolved through a thread-safe completion queue rather than
+/// a poll-based event loop:
+/// - [`AsyncCompletionQueue`]: a `Mutex`+`Condvar` queue collecting owned
+///   results from background workers (`std::thread::spawn` or a tokio runtime).
+/// - [`VirtualMachine::wait_async`](crate::object::VirtualMachine::wait_async):
+/// drains the queue on the VM thread and settles the matching `Promise`s, so
+///   all `Object` manipulation stays single-threaded.
+/// - [`Promise`](crate::object::Promise): the language-level async primitive,
+///   resolved/rejected by the drain loop.
 ///
-/// The native runtime is built on:
-/// - `EventLoop`: Poll-based task scheduler with Rc/RefCell
-/// - `TimerWheel`: Binary heap-based timer scheduling
-/// - `Awaitable`: Poll-based future trait with Waker callbacks
-/// - `Promise`: Core async primitive for deferred values
-///
-/// ## Future Architecture (Tokio Integration)
-///
-/// When the `tokio` feature is enabled, the runtime will:
-/// - Use tokio's multi-threaded scheduler for true parallelism
-/// - Bridge GTS Awaitables to tokio Tasks using channels
-/// - Convert single-threaded Rc/RefCell to Arc/Mutex for thread-safety
-/// - Maintain backward compatibility through runtime detection
-///
-/// ## Integration Points
-///
-/// The key integration points for tokio are:
-/// 1. `VirtualMachine` - Add optional `tokio::runtime::Runtime` field
-/// 2. `EventLoop` - Implement tokio task spawning adapter
-/// 3. `Promise` - Bridge Promise resolution to tokio channels
-/// 4. `stdlib` - Feature-gate async I/O to use tokio primitives
+/// With the `tokio` feature (default), [`TokioRuntime`] provides a standalone
+/// multi-threaded runtime wrapper for callers that need one (e.g. the HTTP
+/// client builds its own). The VM itself does not own a tokio runtime.
 ///
 /// ## Design Principles
 ///
-/// - **Zero-cost abstraction**: Native runtime has no tokio overhead
-/// - **Feature-gated**: Tokio dependency only with `tokio` feature
-/// - **Backward compatible**: Existing code works unchanged
-/// - **Opt-in parallelism**: Users choose runtime via feature flag
+/// - **Single-threaded VM**: all `Object`/`Rc<RefCell<..>>` work happens on the
+///   VM thread; workers exchange only owned (`Send`) data via the queue.
+/// - **Feature-gated**: the tokio dependency is opt-in via the `tokio` feature.
 pub mod completion;
 
 #[cfg(feature = "tokio")]

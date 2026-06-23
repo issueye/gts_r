@@ -88,7 +88,7 @@ fn demo_session() {
 
     let session = Session::new();
 
-    println!("Tokio enabled: {}", session.has_tokio());
+    println!("Tokio enabled: {}", cfg!(feature = "tokio"));
 
     let script = "const x = 10; const y = 20; console.log('Result:', x + y); x + y;";
 
