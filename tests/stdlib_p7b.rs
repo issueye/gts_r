@@ -152,6 +152,8 @@ println(term.hyperlink("site", "https://example.com").indexOf("site") >= 0);
 println(term.read());
 let session = term.start();
 println(session.active);
+term.setTitle("demo");
+term.renderFrame("frame", {full:false});
 "#,
     );
     assert!(output.status.success(), "stderr: {}", stderr_of(&output));
@@ -166,6 +168,7 @@ println(session.active);
     assert_eq!(lines[7], "true");
     assert_eq!(lines[8], "");
     assert_eq!(lines[9], "false");
+    assert!(stdout_of(&output).contains("frame"));
     let _ = fs::remove_dir_all(dir);
 }
 

@@ -300,7 +300,7 @@ fn tui_app_run_loop(
 
     use crossterm::{
         cursor::{Hide, Show},
-        event::{self, Event},
+        event::{self, Event, KeyEventKind},
         execute,
         terminal::{
             self, disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -336,8 +336,10 @@ fn tui_app_run_loop(
         match event::poll(timeout) {
             Ok(true) => match event::read() {
                 Ok(Event::Key(key)) => {
-                    result = tui_app_do_dispatch(ctx, app, tui_key_event_message(key))
-                        .and_then(|_| tui_app_render_to_stdout(ctx, app));
+                    if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+                        result = tui_app_do_dispatch(ctx, app, tui_key_event_message(key))
+                            .and_then(|_| tui_app_render_to_stdout(ctx, app));
+                    }
                 }
                 Ok(Event::Paste(text)) => {
                     result = tui_app_do_dispatch(ctx, app, tui_raw_message(text))

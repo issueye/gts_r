@@ -43,6 +43,10 @@ pub(crate) fn terminal_module() -> Object {
         ("write", native("terminal.write", terminal_write)),
         ("writeln", native("terminal.writeln", terminal_writeln)),
         (
+            "renderFrame",
+            native("terminal.renderFrame", terminal_render_frame),
+        ),
+        (
             "setRawMode",
             native("terminal.setRawMode", terminal_set_raw_mode),
         ),
@@ -57,6 +61,7 @@ pub(crate) fn terminal_module() -> Object {
             native("terminal.clearLine", terminal_clear_line),
         ),
         ("moveTo", native("terminal.moveTo", terminal_move_to)),
+        ("setTitle", native("terminal.setTitle", terminal_set_title)),
         ("style", native("terminal.style", terminal_style)),
         (
             "hyperlink",
@@ -128,6 +133,26 @@ pub(crate) fn terminal_writeln(ctx: &mut CallContext, args: &[Object]) -> Object
     }
 }
 
+pub(crate) fn terminal_render_frame(ctx: &mut CallContext, args: &[Object]) -> Object {
+    let Some(frame) = args.first() else {
+        return new_error(ctx.pos.clone(), "terminal.renderFrame requires frame");
+    };
+    let mut text = String::new();
+    let full = hash_bool_arg(args.get(1), "full").unwrap_or(false);
+    if full {
+        text.push_str("\x1b[2J");
+    }
+    text.push_str("\x1b[H");
+    text.push_str(&object_to_text(frame));
+    match std::io::stdout().write_all(text.as_bytes()) {
+        Ok(_) => {
+            let _ = std::io::stdout().flush();
+            num_obj(text.len() as f64)
+        }
+        Err(e) => new_error(ctx.pos.clone(), format!("terminal.renderFrame: {}", e)),
+    }
+}
+
 pub(crate) fn terminal_set_raw_mode(_ctx: &mut CallContext, _args: &[Object]) -> Object {
     module(vec![
         ("raw", bool_obj(false)),
@@ -176,6 +201,21 @@ pub(crate) fn terminal_move_to(ctx: &mut CallContext, args: &[Object]) -> Object
         Err(err) => return err,
     };
     str_obj(format!("\x1b[{};{}H", row, col))
+}
+
+pub(crate) fn terminal_set_title(ctx: &mut CallContext, args: &[Object]) -> Object {
+    let title = match required_string(ctx, "terminal.setTitle", args, 0, "title") {
+        Ok(title) => title,
+        Err(err) => return err,
+    };
+    if !std::io::stdout().is_terminal() {
+        return Object::Undefined;
+    }
+    let text = format!("\x1b]0;{}\x07", title);
+    match std::io::stdout().write_all(text.as_bytes()) {
+        Ok(_) => num_obj(text.len() as f64),
+        Err(e) => new_error(ctx.pos.clone(), format!("terminal.setTitle: {}", e)),
+    }
 }
 
 pub(crate) fn terminal_style(ctx: &mut CallContext, args: &[Object]) -> Object {
