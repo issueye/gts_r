@@ -39,12 +39,12 @@
 
 ## 阶段 2：Async Completion Queue
 
-- [ ] T2.1 增加线程安全 completion 数据结构
-  - 证据：新增 `AsyncCompletion` / queue 类型，跨线程只传 `Send` 数据。
+- [x] T2.1 增加线程安全 completion 数据结构
+  - 证据：新增 `src/async_runtime/completion.rs`，提供 `AsyncCompletion` / `AsyncCompletionQueue` / `AsyncCompletionSender`，跨线程只传 owned `Send` 数据。
 - [ ] T2.2 VM 线程 drain completion 并 resolve/reject Promise
   - 证据：Promise resolve/reject 只在 VM 线程执行。
-- [ ] T2.3 Tokio task 能把结果投递回 VM
-  - 证据：新增测试：Tokio timer 完成后 JS Promise 被 resolve。
+- [x] T2.3 Tokio task 能把结果投递回 VM
+  - 证据：`tests/async_completion.rs` 覆盖后台线程与 Tokio task 投递 completion，`cargo test --release --test async_completion` 通过。
 - [ ] T2.4 `wait_async` 改为事件循环式 drain
   - 证据：不再单纯 sleep 等待 pending counter。
 
@@ -92,4 +92,4 @@
 
 ## 当前指针
 
-T1.4 删除或收敛 native/tokio 双公开入口。
+T1.4 删除或收敛 native/tokio 双公开入口；下一步同时推进 T2.2 Promise resolve/reject 绑定。

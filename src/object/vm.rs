@@ -9,6 +9,10 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::ast::Position;
+use crate::async_runtime::{
+    AsyncCompletion, AsyncCompletionData, AsyncCompletionId, AsyncCompletionQueue,
+    AsyncCompletionSender,
+};
 
 use super::value::{new_error, Object};
 
@@ -43,8 +47,10 @@ pub struct VirtualMachine {
     /// Which execution backend to use. See `EXEC_MODE_*` constants.
     pub exec_mode: AtomicU8,
     next_timer: AtomicI64,
+    next_async_completion: AtomicI64,
     /// Pending async work counter; the host drains this before returning.
     async_pending: RefCell<usize>,
+    async_completions: AsyncCompletionQueue,
     pub bootstrap_source: RefCell<String>,
     evaluator: RefCell<Option<Rc<EvaluatorFn>>>,
     importer: RefCell<Option<Rc<ImporterFn>>>,
@@ -59,7 +65,9 @@ impl VirtualMachine {
             type_check: AtomicBool::new(false),
             exec_mode: AtomicU8::new(EXEC_MODE_BYTECODE),
             next_timer: AtomicI64::new(0),
+            next_async_completion: AtomicI64::new(0),
             async_pending: RefCell::new(0),
+            async_completions: AsyncCompletionQueue::new(),
             bootstrap_source: RefCell::new(String::new()),
             evaluator: RefCell::new(None),
             importer: RefCell::new(None),
@@ -103,6 +111,10 @@ impl VirtualMachine {
         self.next_timer.fetch_add(1, Ordering::Relaxed) + 1
     }
 
+    pub fn next_async_completion_id(&self) -> AsyncCompletionId {
+        (self.next_async_completion.fetch_add(1, Ordering::Relaxed) + 1) as AsyncCompletionId
+    }
+
     pub fn set_timeout(&self, timeout: Option<Duration>) {
         *self.deadline.borrow_mut() = timeout.map(|duration| Instant::now() + duration);
     }
@@ -126,6 +138,42 @@ impl VirtualMachine {
         *self.async_pending.borrow_mut() += n;
     }
 
+    /// Clone a thread-safe sender for Tokio/background workers.
+    pub fn async_completion_sender(&self) -> AsyncCompletionSender {
+        self.async_completions.sender()
+    }
+
+    /// Queue a completion from the VM thread or tests.
+    pub fn enqueue_async_completion(&self, completion: AsyncCompletion) {
+        self.async_completions.enqueue(completion);
+    }
+
+    /// Convenience helper to resolve an async operation with owned data.
+    pub fn enqueue_async_resolve(&self, id: AsyncCompletionId, data: AsyncCompletionData) {
+        self.enqueue_async_completion(AsyncCompletion::resolve(id, data));
+    }
+
+    /// Convenience helper to reject an async operation with an owned error.
+    pub fn enqueue_async_reject(&self, id: AsyncCompletionId, error: impl Into<String>) {
+        self.enqueue_async_completion(AsyncCompletion::reject(id, error));
+    }
+
+    /// Drain queued completions on the VM thread.
+    ///
+    /// Promise resolution will be wired here in a later step. For now this
+    /// returns pure data completions and updates the pending counter.
+    pub fn drain_async_completions(&self) -> Vec<AsyncCompletion> {
+        let completions = self.async_completions.drain();
+        for _ in &completions {
+            self.async_done();
+        }
+        completions
+    }
+
+    pub fn async_completion_len(&self) -> usize {
+        self.async_completions.len()
+    }
+
     /// Mark async work complete.
     pub fn async_done(&self) {
         let mut g = self.async_pending.borrow_mut();
@@ -139,6 +187,10 @@ impl VirtualMachine {
     /// resolution.
     pub fn wait_async(&self) {
         while *self.async_pending.borrow() > 0 {
+            let drained = self.drain_async_completions();
+            if !drained.is_empty() {
+                continue;
+            }
             if self.check_timeout(Position::default()).is_some() {
                 break;
             }

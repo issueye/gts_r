@@ -12,6 +12,10 @@ mod timer_wheel;
 mod value;
 mod vm;
 
+pub use crate::async_runtime::{
+    AsyncCompletion, AsyncCompletionData, AsyncCompletionId, AsyncCompletionResult,
+    AsyncCompletionSender, AsyncHttpResponse,
+};
 pub use awaitable::{Awaitable, PollResult, Waker, WakerRegistry};
 pub use environment::{Binding, Environment};
 pub use event_loop::EventLoop;
