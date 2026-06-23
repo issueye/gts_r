@@ -625,34 +625,24 @@ fn web_handle_request(
         g.body = Some(format!("Not Found: {} {}", method, path).into_bytes());
         None
     } else {
-        // Run the matched handler chain. Handlers can use either (ctx) or
-        // Express-style (req, res, next).
+        // Run the matched handler chain. Handlers use Express-style
+        // (req, res, next); the old ctx wrapper is intentionally retired.
         let mut err: Option<String> = None;
         for (handler, params) in chain {
-            let ctx_obj = web_context_object(
-                req_obj.clone(),
-                res_obj.clone(),
-                &query_obj,
-                &headers_obj,
-                &params,
+            inject_route_params(req_obj.clone(), &query_obj, &headers_obj, &params);
+            let result = call_script_function(
+                &handler,
+                ctx.env,
+                &[
+                    Object::Hash(req_obj.clone()),
+                    res_obj.clone(),
+                    Object::Builtin(Rc::new(Builtin {
+                        name: "web.next".to_string(),
+                        func: Rc::new(|_ctx, _args| Object::Undefined),
+                        extra: None,
+                    })),
+                ],
             );
-            let result = if web_handler_prefers_express_args(&handler) {
-                call_script_function(
-                    &handler,
-                    ctx.env,
-                    &[
-                        Object::Hash(req_obj.clone()),
-                        res_obj.clone(),
-                        Object::Builtin(Rc::new(Builtin {
-                            name: "web.next".to_string(),
-                            func: Rc::new(|_ctx, _args| Object::Undefined),
-                            extra: None,
-                        })),
-                    ],
-                )
-            } else {
-                call_script_function(&handler, ctx.env, &[ctx_obj])
-            };
             if result.is_runtime_error() {
                 err = Some(result.inspect());
                 break;
@@ -769,22 +759,12 @@ fn web_respond(request: tiny_http::Request, resp_state: &Rc<RefCell<HttpResponse
     let _ = request.respond(response);
 }
 
-fn web_handler_prefers_express_args(handler: &Object) -> bool {
-    match handler {
-        Object::Function(f) => f.params.len() >= 2,
-        Object::Closure(c) => c.proto.params.len() >= 2,
-        _ => false,
-    }
-}
-
-/// Build the context object: `{req, res, params}`.
-fn web_context_object(
+fn inject_route_params(
     req_obj: Rc<RefCell<HashData>>,
-    res_obj: Object,
     query: &Rc<RefCell<HashData>>,
     headers: &Rc<RefCell<HashData>>,
     params: &[(String, String)],
-) -> Object {
+) {
     req_obj
         .borrow_mut()
         .set("query", Object::Hash(query.clone()));
@@ -799,12 +779,6 @@ fn web_context_object(
     req_obj
         .borrow_mut()
         .set("params", Object::Hash(params_obj.clone()));
-
-    let ctx_obj = Rc::new(RefCell::new(HashData::default()));
-    ctx_obj.borrow_mut().set("req", Object::Hash(req_obj));
-    ctx_obj.borrow_mut().set("res", res_obj);
-    ctx_obj.borrow_mut().set("params", Object::Hash(params_obj));
-    Object::Hash(ctx_obj)
 }
 
 // --- web.json / web.text helpers ------------------------------------------
@@ -818,15 +792,8 @@ fn web_json_helper(_ctx: &mut CallContext, args: &[Object]) -> Object {
     match args.get(0) {
         Some(v) => str_obj(value_to_json(v)),
         None => native("web.json.middleware", |ctx, args| {
-            let Some(Object::Hash(ctx_obj)) = args.first() else {
+            let Some(Object::Hash(req_obj)) = args.first() else {
                 return Object::Undefined;
-            };
-            let req_obj = {
-                let ctx_ref = ctx_obj.borrow();
-                match ctx_ref.get("req") {
-                    Some(Object::Hash(req_obj)) => req_obj.clone(),
-                    _ => return Object::Undefined,
-                }
             };
             let body = match req_obj.borrow().get("body") {
                 Some(Object::String(s)) => s.to_string(),
@@ -868,16 +835,12 @@ fn web_static_helper(ctx: &mut CallContext, args: &[Object]) -> Object {
     let root_cell = Rc::new(std::cell::RefCell::new(root));
     native("web.static.handler", move |_ctx, args| {
         let root = root_cell.borrow().clone();
-        let ctx_obj = match args.get(0) {
+        let req_obj = match args.first() {
             Some(Object::Hash(h)) => h.clone(),
             _ => return Object::Undefined,
         };
-        // Read req.path off the context.
-        let path = match ctx_obj.borrow().get("req") {
-            Some(Object::Hash(rh)) => match rh.borrow().get("path") {
-                Some(Object::String(p)) => p.to_string(),
-                _ => "/".to_string(),
-            },
+        let path = match req_obj.borrow().get("path") {
+            Some(Object::String(p)) => p.to_string(),
             _ => "/".to_string(),
         };
         let rel = path.trim_start_matches('/');

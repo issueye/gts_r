@@ -112,9 +112,9 @@ gs --workers 4 main.gs
 
 ```javascript
 let counter = 0;  // 每个 worker 各有独立副本
-app.get("/inc", function(ctx) {
+app.get("/inc", function(req, res) {
     counter++;              // 只在当前 worker 内递增
-    ctx.res.send(String(counter));
+    res.send(String(counter));
 });
 app.listen(port, { workers: 4 });
 ```

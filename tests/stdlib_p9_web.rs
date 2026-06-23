@@ -111,8 +111,8 @@ fn web_get_route_returns_text() {
     let script = r#"
 let web = require("@std/web");
 let app = web.createApp();
-app.get("/hello", function(ctx) {
-    ctx.res.send("hi from web");
+app.get("/hello", function(req, res) {
+    res.send("hi from web");
 });
 let port = 18080;
 println(`GTS_PORT=${port}`);
@@ -139,8 +139,8 @@ fn web_route_params_and_json() {
     let script = r#"
 let web = require("@std/web");
 let app = web.createApp();
-app.get("/users/:id", function(ctx) {
-    ctx.res.json({ id: ctx.params.id });
+app.get("/users/:id", function(req, res) {
+    res.json({ id: req.params.id });
 });
 let port = 18081;
 println(`GTS_PORT=${port}`);
@@ -199,7 +199,7 @@ fn web_unmatched_route_returns_404() {
     let script = r#"
 let web = require("@std/web");
 let app = web.createApp();
-app.get("/here", function(ctx) { ctx.res.send("ok"); });
+app.get("/here", function(req, res) { res.send("ok"); });
 let port = 18082;
 println(`GTS_PORT=${port}`);
 app.listen(port, {count: 1});
@@ -224,9 +224,9 @@ fn web_middleware_runs_before_route() {
 let web = require("@std/web");
 let app = web.createApp();
 let log = [];
-app.use(function(ctx) { log.push("mw"); });
-app.get("/x", function(ctx) {
-    ctx.res.send(`log=${log.length}`);
+app.use(function(req, res, next) { log.push("mw"); });
+app.get("/x", function(req, res) {
+    res.send(`log=${log.length}`);
 });
 let port = 18083;
 println(`GTS_PORT=${port}`);
@@ -287,8 +287,8 @@ let app = web.createApp();
 let port = 18084;
 println(`GTS_PORT=${port}`);
 app.use(web.json());
-app.post("/body", function(ctx) {
-  ctx.res.json({ name: ctx.req.body.name, age: ctx.req.body.age });
+app.post("/body", function(req, res) {
+  res.json({ name: req.body.name, age: req.body.age });
 });
 app.listen(port, {count: 1});
 "#;
@@ -352,7 +352,7 @@ fn web_handler_returned_promise_delays_response_until_settled() {
 let web = require("@std/web");
 let http = require("@std/http");
 let app = web.createApp();
-app.get("/proxy", function(ctx) {{
+app.get("/proxy", function(req, res) {{
   return http.requestAsync({{
     url: "{upstream}",
     method: "GET",
@@ -394,15 +394,15 @@ fn web_async_handler_can_update_response_after_resume() {
 let web = require("@std/web");
 let http = require("@std/http");
 let app = web.createApp();
-app.get("/proxy", function(ctx) {{
+app.get("/proxy", function(req, res) {{
   return http.requestAsync({{
     url: "{upstream}",
     method: "GET",
     timeoutMs: 3000
   }}).then(function(resp) {{
-    ctx.res.status(202);
-    ctx.res.setHeader("X-Upstream-Status", resp.status);
-    ctx.res.send(resp.body);
+    res.status(202);
+    res.setHeader("X-Upstream-Status", resp.status);
+    res.send(resp.body);
   }});
 }});
 let port = 18094;
@@ -550,9 +550,9 @@ fn web_concurrent_requests_run_in_parallel() {
 let web = require("@std/web");
 let timers = require("@std/timers");
 let app = web.createApp();
-app.get("/slow", function(ctx) {
+app.get("/slow", function(req, res) {
     timers.sleep(300);
-    ctx.res.send("ok");
+    res.send("ok");
 });
 let port = 18091;
 println(`GTS_PORT=${port}`);
@@ -587,9 +587,9 @@ fn web_workers_serve_multiple_routes() {
     let script = r#"
 let web = require("@std/web");
 let app = web.createApp();
-app.get("/ping", function(ctx) { ctx.res.send("pong"); });
-app.get("/echo/:id", function(ctx) { ctx.res.json({ id: ctx.params.id }); });
-app.get("/hello", function(ctx) { ctx.res.send("world"); });
+app.get("/ping", function(req, res) { res.send("pong"); });
+app.get("/echo/:id", function(req, res) { res.json({ id: req.params.id }); });
+app.get("/hello", function(req, res) { res.send("world"); });
 let port = 18092;
 println(`GTS_PORT=${port}`);
 app.listen(port, { workers: 2 });
@@ -641,8 +641,8 @@ fn web_close_shuts_down_workers() {
     let script = r#"
 let web = require("@std/web");
 let app = web.createApp();
-app.get("/stop", function(ctx) {
-    ctx.res.send("bye");
+app.get("/stop", function(req, res) {
+    res.send("bye");
     app.close();
 });
 let port = 18093;

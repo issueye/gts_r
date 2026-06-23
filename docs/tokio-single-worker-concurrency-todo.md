@@ -64,11 +64,11 @@
 - [x] T4.1 `@std/web` 支持 handler 返回 Promise
   - 证据：`src/stdlib/modules/web.rs` 在 handler 返回 Promise 时挂接响应 continuation，并在 reject 时返回 500；`tests/stdlib_p9_web.rs` 新增 `web_handler_returned_promise_delays_response_until_settled`，handler 直接返回 pending `http.requestAsync` Promise，本地 delayed upstream 未完成前不会发送响应；验证：`cargo fmt --check`、`cargo test --release --test stdlib_p9_web web_handler_returned_promise_delays_response_until_settled -- --nocapture` 通过。
 - [x] T4.2 response state 可挂起
-  - 证据：`src/object/promise.rs` 支持 Promise settlement continuation，`src/evaluator/builtins.rs` 的 `Promise.then/catch/finally` 对 pending Promise 返回下游 Promise 而不阻塞等待；`tests/stdlib_p9_web.rs` 新增 `web_async_handler_can_update_response_after_resume`，验证 async handler 恢复后 `ctx.res.status`、`ctx.res.setHeader`、`ctx.res.send` 能影响最终响应；验证：`cargo fmt --check`、`cargo test --release --test stdlib_p9_web web_async_handler_can_update_response_after_resume -- --nocapture`、`cargo test --release --test stdlib_p9_web web_handler_returned_promise_delays_response_until_settled -- --nocapture` 通过。
+  - 证据：`src/object/promise.rs` 支持 Promise settlement continuation，`src/evaluator/builtins.rs` 的 `Promise.then/catch/finally` 对 pending Promise 返回下游 Promise 而不阻塞等待；`tests/stdlib_p9_web.rs` 新增 `web_async_handler_can_update_response_after_resume`，验证 async handler 恢复后 `res.status`、`res.setHeader`、`res.send` 能影响最终响应；验证：`cargo fmt --check`、`cargo test --release --test stdlib_p9_web web_async_handler_can_update_response_after_resume -- --nocapture`、`cargo test --release --test stdlib_p9_web web_handler_returned_promise_delays_response_until_settled -- --nocapture` 通过。
 - [x] T4.3 单 worker accept loop 不等待上游 I/O
   - 证据：`src/stdlib/modules/web.rs` 的单 worker accept loop 在请求返回 pending Promise 时挂起响应并继续 accept，同时在 loop tick 中 drain VM completion；`tests/stdlib_p9_web.rs` 启用并改造 `web_single_worker_does_not_block_fast_route_while_slow_route_waits`，慢路由等待 delayed upstream `http.requestAsync(...).then(...)` 时，同一 worker 的 `/healthz` 可在 150ms 内返回；验证：`cargo fmt --check`、`cargo test --release --test stdlib_p9_web web_single_worker_does_not_block_fast_route_while_slow_route_waits -- --nocapture`、`cargo test --release --test stdlib_p9_web web_async_handler_can_update_response_after_resume -- --nocapture`、`cargo test --release --test stdlib_p9_web web_handler_returned_promise_delays_response_until_settled -- --nocapture`、`cargo test --release --test stdlib_p9_web web_listen_default_serves_multiple_requests -- --nocapture`、`cargo test --release --test bytecode_async`、`cargo test --release --test async_completion` 通过。
-- [ ] T4.4 收敛 handler 签名
-  - 证据：优先统一 `(req, res, next)`；旧 `ctx` 路径不再作为长期主路径。
+- [x] T4.4 收敛 handler 签名
+  - 证据：`src/stdlib/modules/web.rs` 移除 `web_handler_prefers_express_args` 与旧 `ctx` wrapper 构造，handler dispatch 统一调用 `(req, res, next)`；`web.json()` 与 `web.static()` middleware 同步改为接收 `req`；`tests/stdlib_p9_web.rs` 的 web handler fixture 全部切到 `(req, res)` / `(req, res, next)`；`docs/web-concurrency-design.md` 示例同步为新签名；验证：`cargo fmt --check`、`cargo test --release --test stdlib_p9_web web_handler_returned_promise_delays_response_until_settled -- --nocapture`、`cargo test --release --test stdlib_p9_web -- --test-threads=1` 通过。
 
 ## 阶段 5：gs-llm-bridge 切换
 
@@ -92,4 +92,4 @@
 
 ## 当前指针
 
-T4.4 收敛 handler 签名。
+T5.1 代理非流式请求切到 `await http.requestAsync`。
