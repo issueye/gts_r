@@ -45,8 +45,8 @@
   - 证据：`src/object/vm.rs` 新增 `completion_id -> Promise` 登记表，`drain_async_completions()` 在 VM 线程把 owned completion 转成 `Object` 并 resolve/reject；`tests/async_completion.rs` 覆盖 resolve/reject Promise，`cargo test --release --test async_completion` 通过。
 - [x] T2.3 Tokio task 能把结果投递回 VM
   - 证据：`tests/async_completion.rs` 覆盖后台线程与 Tokio task 投递 completion，`cargo test --release --test async_completion` 通过。
-- [ ] T2.4 `wait_async` 改为事件循环式 drain
-  - 证据：不再单纯 sleep 等待 pending counter。
+- [x] T2.4 `wait_async` 改为事件循环式 drain
+  - 证据：`src/async_runtime/completion.rs` 的 completion queue 增加 `Condvar` 通知；`src/object/vm.rs` 的 `wait_async()` 在 registered Promise 存在时等待 completion 通知并 drain，不再单纯 sleep polling；`tests/async_completion.rs` 新增 `wait_async_wakes_when_registered_completion_arrives`，`cargo test --release --test async_completion` 通过。
 
 ## 阶段 3：异步 HTTP Client
 
@@ -92,4 +92,4 @@
 
 ## 当前指针
 
-T2.4 `wait_async` 改为事件循环式 drain。
+T3.1 新增 `@std/http.requestAsync(options)`。

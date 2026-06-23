@@ -5,7 +5,8 @@
 //! resolution for the VM thread that drains the queue.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 /// A logical async operation identifier allocated on the VM thread.
 pub type AsyncCompletionId = u64;
@@ -64,19 +65,28 @@ struct AsyncCompletionQueueInner {
     pending: VecDeque<AsyncCompletion>,
 }
 
+#[derive(Debug, Default)]
+struct AsyncCompletionQueueState {
+    inner: Mutex<AsyncCompletionQueueInner>,
+    ready: Condvar,
+}
+
 /// Cloneable sender safe to move into Tokio/background threads.
 #[derive(Debug, Clone, Default)]
 pub struct AsyncCompletionSender {
-    inner: Arc<Mutex<AsyncCompletionQueueInner>>,
+    state: Arc<AsyncCompletionQueueState>,
 }
 
 impl AsyncCompletionSender {
     pub fn enqueue(&self, completion: AsyncCompletion) {
-        self.inner
+        let mut inner = self
+            .state
+            .inner
             .lock()
-            .expect("async completion queue poisoned")
-            .pending
-            .push_back(completion);
+            .expect("async completion queue poisoned");
+        inner.pending.push_back(completion);
+        drop(inner);
+        self.state.ready.notify_one();
     }
 
     pub fn resolve(&self, id: AsyncCompletionId, data: AsyncCompletionData) {
@@ -110,14 +120,35 @@ impl AsyncCompletionQueue {
     pub fn drain(&self) -> Vec<AsyncCompletion> {
         let mut inner = self
             .sender
+            .state
             .inner
             .lock()
             .expect("async completion queue poisoned");
         inner.pending.drain(..).collect()
     }
 
+    pub fn wait_for_completion(&self, timeout: Duration) -> bool {
+        let inner = self
+            .sender
+            .state
+            .inner
+            .lock()
+            .expect("async completion queue poisoned");
+        if !inner.pending.is_empty() {
+            return true;
+        }
+        let (inner, _result) = self
+            .sender
+            .state
+            .ready
+            .wait_timeout(inner, timeout)
+            .expect("async completion queue poisoned");
+        !inner.pending.is_empty()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.sender
+            .state
             .inner
             .lock()
             .expect("async completion queue poisoned")
@@ -127,6 +158,7 @@ impl AsyncCompletionQueue {
 
     pub fn len(&self) -> usize {
         self.sender
+            .state
             .inner
             .lock()
             .expect("async completion queue poisoned")

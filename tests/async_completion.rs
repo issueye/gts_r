@@ -77,6 +77,25 @@ fn vm_drain_rejects_registered_promise_on_vm_thread() {
     assert!(promise.wait().inspect().contains("network failed"));
 }
 
+#[test]
+fn wait_async_wakes_when_registered_completion_arrives() {
+    let vm = VirtualMachine::new();
+    let (id, promise) = vm.create_async_completion_promise();
+    let sender = vm.async_completion_sender();
+
+    let worker = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        sender.resolve(id, AsyncCompletionData::Text("awake".to_string()));
+    });
+
+    vm.wait_async();
+    worker.join().unwrap();
+
+    assert!(!vm.has_async_pending());
+    assert_eq!(promise.state(), PromiseState::Fulfilled);
+    assert_eq!(promise.wait().inspect(), "awake");
+}
+
 #[cfg(feature = "tokio")]
 #[test]
 fn tokio_task_can_enqueue_completion_for_vm_drain() {

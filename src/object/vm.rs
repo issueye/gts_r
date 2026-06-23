@@ -208,6 +208,10 @@ impl VirtualMachine {
         self.async_promises.borrow().len()
     }
 
+    pub fn has_async_pending(&self) -> bool {
+        *self.async_pending.borrow() > 0
+    }
+
     /// Mark async work complete.
     pub fn async_done(&self) {
         let mut g = self.async_pending.borrow_mut();
@@ -228,7 +232,12 @@ impl VirtualMachine {
             if self.check_timeout(Position::default()).is_some() {
                 break;
             }
-            std::thread::sleep(std::time::Duration::from_millis(1));
+            if !self.async_promises.borrow().is_empty() {
+                self.async_completions
+                    .wait_for_completion(Duration::from_millis(100));
+            } else {
+                std::thread::sleep(Duration::from_millis(1));
+            }
         }
     }
 }
