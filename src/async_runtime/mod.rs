@@ -40,9 +40,6 @@ pub mod native;
 #[cfg(feature = "tokio")]
 pub mod tokio_rt;
 
-#[cfg(feature = "tokio")]
-pub mod awaitable_bridge;
-
 // Re-export the native runtime as the default
 pub use completion::{
     AsyncCompletion, AsyncCompletionData, AsyncCompletionId, AsyncCompletionQueue,
@@ -52,6 +49,3 @@ pub use native::NativeRuntime;
 
 #[cfg(feature = "tokio")]
 pub use tokio_rt::TokioRuntime;
-
-#[cfg(feature = "tokio")]
-pub use awaitable_bridge::{spawn_blocking_gts, AsyncCoordinator, SerializedResult};
