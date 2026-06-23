@@ -64,6 +64,75 @@ pub(crate) fn http_response_object(state: Rc<RefCell<HttpResponseState>>) -> Obj
     );
     let s = state.clone();
     obj.borrow_mut().set(
+        "write",
+        native("response.write", move |_ctx, args| {
+            let text = match args.get(0) {
+                Some(Object::String(v)) => v.to_string(),
+                Some(o) => o.inspect(),
+                None => String::new(),
+            };
+            let mut g = s.borrow_mut();
+            if g.content_type.is_none() {
+                g.content_type = Some("text/plain".to_string());
+            }
+            g.body
+                .get_or_insert_with(Vec::new)
+                .extend_from_slice(text.as_bytes());
+            Object::Undefined
+        }),
+    );
+    let s = state.clone();
+    obj.borrow_mut().set(
+        "stream",
+        native("response.stream", move |ctx, args| {
+            let Some(stream) = args.get(0).cloned() else {
+                return Object::Undefined;
+            };
+            let mut text = String::new();
+            if let Object::Hash(h) = &stream {
+                if let Some(read_all) = h.borrow().get("readAll").cloned() {
+                    let result = call_script_function(&read_all, ctx.env, &[]);
+                    if result.is_runtime_error() {
+                        return result;
+                    }
+                    text = match result {
+                        Object::String(v) => v.to_string(),
+                        Object::Null | Object::Undefined => String::new(),
+                        other => other.inspect(),
+                    };
+                } else if let Some(read_text) = h.borrow().get("readText").cloned() {
+                    loop {
+                        let result = call_script_function(&read_text, ctx.env, &[]);
+                        if result.is_runtime_error() {
+                            return result;
+                        }
+                        match result {
+                            Object::String(v) => text.push_str(&v),
+                            Object::Null | Object::Undefined => break,
+                            other => {
+                                text.push_str(&other.inspect());
+                                break;
+                            }
+                        }
+                    }
+                } else if let Some(Object::String(v)) = h.borrow().get("text") {
+                    text = v.to_string();
+                }
+            } else {
+                text = stream.inspect();
+            }
+            let mut g = s.borrow_mut();
+            if g.content_type.is_none() {
+                g.content_type = Some("application/octet-stream".to_string());
+            }
+            g.body
+                .get_or_insert_with(Vec::new)
+                .extend_from_slice(text.as_bytes());
+            Object::Undefined
+        }),
+    );
+    let s = state.clone();
+    obj.borrow_mut().set(
         "json",
         native("response.json", move |_ctx, args| {
             let text = match args.get(0) {

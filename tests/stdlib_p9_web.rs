@@ -313,6 +313,76 @@ app.listen(port, {count: 1});
 }
 
 #[test]
+fn web_response_write_accumulates_sse_body() {
+    let dir = unique_temp_dir("gts-p9-web-write-sse");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let script = r#"
+let web = require("@std/web");
+let app = web.createApp();
+app.get("/events", function(req, res) {
+  res.status(200);
+  res.setHeader("Content-Type", "text/event-stream");
+  res.write("event: message\n");
+  res.write("data: one\n\n");
+  res.write("data: [DONE]\n\n");
+});
+let port = 18095;
+println(`GTS_PORT=${port}`);
+app.listen(port, {count: 1});
+"#;
+    let (mut child, port) = spawn_server_script(&dir, script);
+    let (status, head, body) = http_round_trip(
+        "127.0.0.1",
+        port,
+        "GET /events HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    let _ = child.wait();
+    let _ = fs::remove_dir_all(dir);
+    assert!(status.contains("200"), "status was: {}", status);
+    assert!(
+        head.to_ascii_lowercase()
+            .contains("content-type: text/event-stream"),
+        "head: {}",
+        head
+    );
+    assert_eq!(body, "event: message\ndata: one\n\ndata: [DONE]\n\n");
+}
+
+#[test]
+fn web_response_stream_forwards_stream_body() {
+    let dir = unique_temp_dir("gts-p9-web-stream-body");
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let script = r#"
+let web = require("@std/web");
+let stream = require("@std/stream");
+let app = web.createApp();
+app.get("/stream", function(req, res) {
+  res.setHeader("Content-Type", "text/event-stream");
+  return res.stream(stream.fromString("data: one\n\ndata: two\n\n"));
+});
+let port = 18096;
+println(`GTS_PORT=${port}`);
+app.listen(port, {count: 1});
+"#;
+    let (mut child, port) = spawn_server_script(&dir, script);
+    let (status, head, body) = http_round_trip(
+        "127.0.0.1",
+        port,
+        "GET /stream HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    let _ = child.wait();
+    let _ = fs::remove_dir_all(dir);
+    assert!(status.contains("200"), "status was: {}", status);
+    assert!(
+        head.to_ascii_lowercase()
+            .contains("content-type: text/event-stream"),
+        "head: {}",
+        head
+    );
+    assert_eq!(body, "data: one\n\ndata: two\n\n");
+}
+
+#[test]
 fn web_listen_default_serves_multiple_requests() {
     let dir = unique_temp_dir("gts-p9-web-default-listen");
     fs::create_dir_all(&dir).expect("create temp dir");

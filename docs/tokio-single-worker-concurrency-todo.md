@@ -83,8 +83,8 @@
 
 - [x] T6.1 新增 `http.streamAsync`
   - 证据：`src/stdlib/modules/net_http_client.rs` 暴露 `http.streamAsync(options)`，通过 Tokio HTTP client 在后台请求并返回 Promise；`src/async_runtime/completion.rs` 新增 `HttpStreamResponse` completion 数据，`src/object/vm.rs` 在 VM 线程 resolve 成 `{ status, statusText, headers, ok, body }`，其中 `body` 提供 `read/readText/readLine/readAll/close` stream-like API；`tests/stdlib_p8_http.rs` 新增 `http_client_stream_async_returns_stream_response` 覆盖 `await http.streamAsync(...)` 后按行读取响应体；验证：`cargo fmt --check`、`cargo test --release --test stdlib_p8_http http_client_stream_async_returns_stream_response -- --nocapture`、`cargo test --release --test stdlib_p8_http http_client_request_async_returns_promise_response -- --nocapture`、`cargo test --release --test async_completion` 通过。
-- [ ] T6.2 Web response 支持 chunked/SSE 写出
-  - 证据：上游 chunk 到达后可增量写下游。
+- [x] T6.2 Web response 支持 chunked/SSE 写出
+  - 证据：`src/stdlib/helpers/http.rs` 为 Web response 增加 `res.write(text)` 与 `res.stream(stream)`，支持 SSE 文本块累积写出和 stream-like body 转发；`tests/stdlib_p9_web.rs` 新增 `web_response_write_accumulates_sse_body` 与 `web_response_stream_forwards_stream_body` 覆盖 `text/event-stream` 响应与 `@std/stream` 转发；验证：`cargo fmt --check`、`cargo test --release --test stdlib_p9_web web_response_write_accumulates_sse_body -- --nocapture`、`cargo test --release --test stdlib_p9_web web_response_stream_forwards_stream_body -- --nocapture`、`cargo test --release --test stdlib_p9_web -- --test-threads=1` 通过。
 - [ ] T6.3 流式压测
   - 证据：`chat stream c=1,10 fail=0`，且 `/healthz` 不被长流阻塞。
 
@@ -92,4 +92,4 @@
 
 ## 当前指针
 
-T6.2 Web response 支持 chunked/SSE 写出。
+T6.3 流式压测。
