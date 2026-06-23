@@ -76,8 +76,8 @@
   - 证据：`gs-llm-bridge/src/services/proxy_service.gs` 非流式路径从同步 `http.request` 切到 `http.requestAsync(...).then(...).catch(...)` Promise 链，handler 直接返回 pending Promise 给 `@std/web` 挂起响应；本地 mock OpenAI Chat 上游端到端验证通过，`POST /v1/chat/completions` 返回 200、内容 `async-ok`、上游命中 1 次。
 - [x] T5.2 单 worker 代理压测
   - 证据：使用 `gts_r\target\release\gs.exe --timeout 0 main.gs --addr 127.0.0.1:18252 --data-dir .perf-data-t52-*` 启动 `gs-llm-bridge` 单 worker bytecode 模式，运行 `gs-llm-bridge\perf\perf.exe -bridge http://127.0.0.1:18252 -duration 3s -concurrency 1,10,50 -warmup=false`；`chat same-protocol c=1` 为 `n=27 fail=0`，`c=10` 为 `n=4710 fail=0`，`c=50` 为 `n=4796 fail=0`。
-- [ ] T5.3 排队延迟验收
-  - 证据：c=50 p95 不再出现秒级排队。
+- [x] T5.3 排队延迟验收
+  - 证据：同 T5.2 压测，`chat same-protocol c=50` 结果为 `rps=1598.7 n=4796 fail=0 p50=31.39ms p95=35.11ms p99=37.58ms max=141.81ms`，p95 与 max 均未出现秒级排队。
 
 ## 阶段 6：流式代理与 SSE
 
@@ -92,4 +92,4 @@
 
 ## 当前指针
 
-T5.3 排队延迟验收。
+T6.1 新增 `http.streamAsync`。
