@@ -4,10 +4,10 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::{Read, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf, MAIN_SEPARATOR, MAIN_SEPARATOR_STR};
 use std::rc::Rc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[allow(unused_imports)]
 use std::process::Command;
@@ -236,20 +236,29 @@ pub(crate) fn tui_app_run(ctx: &mut CallContext, args: &[Object]) -> Object {
             return new_error(ctx.pos.clone(), "tui.app.run: options must be an object");
         }
     }
+    let opts = args.first().and_then(|arg| match arg {
+        Object::Hash(hash) => Some(hash.clone()),
+        _ => None,
+    });
+    let tick_ms = opts
+        .as_ref()
+        .and_then(|hash| tui_hash_number(&hash.borrow(), "tickMs"))
+        .filter(|value| *value > 0.0)
+        .unwrap_or(120.0) as u64;
+    let alternate_screen = opts
+        .as_ref()
+        .and_then(|hash| tui_hash_bool(&hash.borrow(), "alternateScreen"))
+        .unwrap_or(false);
+    let hide_cursor = opts
+        .as_ref()
+        .and_then(|hash| tui_hash_bool(&hash.borrow(), "hideCursor"))
+        .unwrap_or(false);
     app.running.set(true);
     app.stopped.set(false);
-    let _ = tui_app_do_dispatch(
-        ctx,
-        &app,
-        tui_resize_message(terminal_cols(), terminal_rows(), true),
-    );
-    let result = tui_app_do_render(ctx, &app, terminal_size_object());
+    let result = tui_app_run_loop(ctx, &app, tick_ms, alternate_screen, hide_cursor);
     app.running.set(false);
     match result {
-        Ok(frame) => {
-            let _ = std::io::stdout().write_all(frame.as_bytes());
-            app.state.borrow().clone()
-        }
+        Ok(()) => app.state.borrow().clone(),
         Err(err) => err,
     }
 }
@@ -268,6 +277,128 @@ pub(crate) fn tui_app_state(ctx: &mut CallContext, _args: &[Object]) -> Object {
         Ok(app) => app.state.borrow().clone(),
         Err(err) => err,
     }
+}
+
+fn tui_app_run_loop(
+    ctx: &mut CallContext,
+    app: &Rc<TuiApp>,
+    tick_ms: u64,
+    alternate_screen: bool,
+    hide_cursor: bool,
+) -> Result<(), Object> {
+    let mut stdout = std::io::stdout();
+    let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    if !interactive {
+        tui_app_do_dispatch(
+            ctx,
+            app,
+            tui_resize_message(terminal_cols(), terminal_rows(), true),
+        )?;
+        tui_app_render_to_stdout(ctx, app)?;
+        return Ok(());
+    }
+
+    use crossterm::{
+        cursor::{Hide, Show},
+        event::{self, Event},
+        execute,
+        terminal::{
+            self, disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+        },
+    };
+
+    if enable_raw_mode().is_err() {
+        return Err(new_error(
+            ctx.pos.clone(),
+            "tui.app.run: failed to enable raw mode",
+        ));
+    }
+    if alternate_screen {
+        let _ = execute!(stdout, EnterAlternateScreen);
+    }
+    if hide_cursor {
+        let _ = execute!(stdout, Hide);
+    }
+
+    let mut last_size =
+        terminal::size().unwrap_or((terminal_cols() as u16, terminal_rows() as u16));
+    let _ = tui_app_do_dispatch(
+        ctx,
+        app,
+        tui_resize_message(last_size.0 as i32, last_size.1 as i32, true),
+    );
+    let mut result = tui_app_render_to_stdout(ctx, app);
+    let mut next_tick = Instant::now() + Duration::from_millis(tick_ms.max(1));
+
+    while result.is_ok() && !app.stopped.get() {
+        let now = Instant::now();
+        let timeout = next_tick.saturating_duration_since(now);
+        match event::poll(timeout) {
+            Ok(true) => match event::read() {
+                Ok(Event::Key(key)) => {
+                    result = tui_app_do_dispatch(ctx, app, tui_key_event_message(key))
+                        .and_then(|_| tui_app_render_to_stdout(ctx, app));
+                }
+                Ok(Event::Paste(text)) => {
+                    result = tui_app_do_dispatch(ctx, app, tui_raw_message(text))
+                        .and_then(|_| tui_app_render_to_stdout(ctx, app));
+                }
+                Ok(Event::Resize(cols, rows)) => {
+                    last_size = (cols, rows);
+                    result = tui_app_do_dispatch(
+                        ctx,
+                        app,
+                        tui_resize_message(cols as i32, rows as i32, true),
+                    )
+                    .and_then(|_| tui_app_render_to_stdout(ctx, app));
+                }
+                Ok(Event::Mouse(mouse)) => {
+                    result = tui_app_do_dispatch(ctx, app, tui_mouse_event_message(mouse))
+                        .and_then(|_| tui_app_render_to_stdout(ctx, app));
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    result = Err(new_error(ctx.pos.clone(), format!("tui.app.run: {}", err)));
+                }
+            },
+            Ok(false) => {
+                next_tick = Instant::now() + Duration::from_millis(tick_ms.max(1));
+                if let Ok(size) = terminal::size() {
+                    if size != last_size {
+                        last_size = size;
+                        result = tui_app_do_dispatch(
+                            ctx,
+                            app,
+                            tui_resize_message(size.0 as i32, size.1 as i32, true),
+                        );
+                    }
+                }
+                if result.is_ok() {
+                    result = tui_app_do_dispatch(ctx, app, tui_tick_message())
+                        .and_then(|_| tui_app_render_to_stdout(ctx, app));
+                }
+            }
+            Err(err) => result = Err(new_error(ctx.pos.clone(), format!("tui.app.run: {}", err))),
+        }
+    }
+
+    if hide_cursor {
+        let _ = execute!(stdout, Show);
+    }
+    if alternate_screen {
+        let _ = execute!(stdout, LeaveAlternateScreen);
+    }
+    let _ = disable_raw_mode();
+    result
+}
+
+fn tui_app_render_to_stdout(ctx: &mut CallContext, app: &Rc<TuiApp>) -> Result<(), Object> {
+    let frame = tui_app_do_render(ctx, app, terminal_size_object())?;
+    std::io::stdout()
+        .write_all(format!("\x1b[H{}", frame).as_bytes())
+        .map_err(|err| new_error(ctx.pos.clone(), format!("tui.app.render: {}", err)))?;
+    let _ = std::io::stdout().flush();
+    Ok(())
 }
 
 pub(crate) fn tui_app_do_dispatch(
@@ -394,6 +525,80 @@ pub(crate) fn tui_tick_message() -> Object {
     hash.borrow_mut().set("type", str_obj("tick"));
     hash.borrow_mut().set("timeMs", num_obj(ms));
     Object::Hash(hash)
+}
+
+fn tui_raw_message(raw: String) -> Object {
+    let hash = Rc::new(RefCell::new(HashData::default()));
+    hash.borrow_mut().set("type", str_obj("raw"));
+    hash.borrow_mut().set("raw", str_obj(raw));
+    Object::Hash(hash)
+}
+
+fn tui_key_event_message(event: crossterm::event::KeyEvent) -> Object {
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    if event.modifiers.contains(KeyModifiers::CONTROL) {
+        let name = match event.code {
+            KeyCode::Char('c') | KeyCode::Char('C') => "ctrl+c",
+            KeyCode::Char('o') | KeyCode::Char('O') => "ctrl+o",
+            KeyCode::Char('q') | KeyCode::Char('Q') => "ctrl+q",
+            KeyCode::Char('r') | KeyCode::Char('R') => "ctrl+r",
+            KeyCode::Char('s') | KeyCode::Char('S') => "ctrl+s",
+            _ => "",
+        };
+        if !name.is_empty() {
+            return tui_key_message(name, "");
+        }
+    }
+
+    match event.code {
+        KeyCode::Backspace => tui_key_message("backspace", ""),
+        KeyCode::Enter => tui_key_message("enter", ""),
+        KeyCode::Left => tui_key_message("left", ""),
+        KeyCode::Right => tui_key_message("right", ""),
+        KeyCode::Up => tui_key_message("up", ""),
+        KeyCode::Down => tui_key_message("down", ""),
+        KeyCode::Home => tui_key_message("home", ""),
+        KeyCode::End => tui_key_message("end", ""),
+        KeyCode::PageUp => tui_key_message("pageUp", ""),
+        KeyCode::PageDown => tui_key_message("pageDown", ""),
+        KeyCode::Tab => tui_key_message("tab", ""),
+        KeyCode::BackTab => tui_key_message("shift+tab", ""),
+        KeyCode::Esc => tui_key_message("escape", ""),
+        KeyCode::Char(ch) => tui_text_message(&ch.to_string(), &ch.to_string()),
+        _ => tui_key_message("unknown", ""),
+    }
+}
+
+fn tui_mouse_event_message(event: crossterm::event::MouseEvent) -> Object {
+    use crossterm::event::{MouseButton, MouseEventKind};
+
+    let (action, button) = match event.kind {
+        MouseEventKind::Down(button) => ("down", tui_mouse_button_number(button)),
+        MouseEventKind::Up(button) => ("release", tui_mouse_button_number(button)),
+        MouseEventKind::Drag(button) => ("drag", tui_mouse_button_number(button)),
+        MouseEventKind::Moved => ("move", 0),
+        MouseEventKind::ScrollUp => ("wheel", 64),
+        MouseEventKind::ScrollDown => ("wheel", 65),
+        MouseEventKind::ScrollLeft => ("wheelLeft", 66),
+        MouseEventKind::ScrollRight => ("wheelRight", 67),
+    };
+    let hash = Rc::new(RefCell::new(HashData::default()));
+    hash.borrow_mut().set("type", str_obj("mouse"));
+    hash.borrow_mut().set("action", str_obj(action));
+    hash.borrow_mut().set("button", num_obj(button as f64));
+    hash.borrow_mut().set("x", num_obj(event.column as f64));
+    hash.borrow_mut().set("y", num_obj(event.row as f64));
+    Object::Hash(hash)
+}
+
+fn tui_mouse_button_number(button: crossterm::event::MouseButton) -> i32 {
+    use crossterm::event::MouseButton;
+    match button {
+        MouseButton::Left => 0,
+        MouseButton::Right => 2,
+        MouseButton::Middle => 1,
+    }
 }
 
 pub(crate) fn tui_box(ctx: &mut CallContext, args: &[Object]) -> Object {
@@ -777,6 +982,13 @@ pub(crate) fn tui_hash_bool(hash: &HashData, key: &str) -> Option<bool> {
         Some(Object::Boolean(value)) => Some(*value),
         Some(Object::Null | Object::Undefined) | None => None,
         Some(value) => Some(value.is_truthy()),
+    }
+}
+
+pub(crate) fn tui_hash_number(hash: &HashData, key: &str) -> Option<f64> {
+    match hash.get(key) {
+        Some(Object::Number(value)) => Some(*value),
+        _ => None,
     }
 }
 
