@@ -6,7 +6,7 @@
 pub mod client;
 pub mod server;
 
-use crate::object::{CallContext, Object};
+use crate::object::Object;
 
 /// Load a GTP stdlib module by name
 pub fn load_gtp_module(name: &str) -> Option<Object> {

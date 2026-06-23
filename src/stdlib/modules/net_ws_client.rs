@@ -1,35 +1,13 @@
-use std::cell::Cell;
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::env;
-use std::fs;
-use std::fs::OpenOptions;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf, MAIN_SEPARATOR, MAIN_SEPARATOR_STR};
 use std::rc::Rc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-#[allow(unused_imports)]
-use std::process::Command;
-#[allow(unused_imports)]
-use std::process::Stdio;
 
-use flate2::read::GzDecoder;
-use flate2::write::GzEncoder;
-use flate2::Compression;
-#[allow(unused_imports)]
-use regex::Regex;
 
 use super::super::helpers::*;
-#[allow(unused_imports)]
-use crate::ast::Position;
-#[allow(unused_imports)]
 use crate::object::{
-    bool_obj, format_number, new_error, num_obj, str_obj, strict_equal, ArrayData, Builtin,
+    new_error, str_obj,
     CallContext, HashData, Object,
 };
-#[allow(unused_imports)]
-use crate::VERSION;
 
 pub(crate) const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -215,7 +193,7 @@ pub(crate) fn ws_write_frame(
 }
 
 pub(crate) fn ws_read_frame(stream: &mut std::net::TcpStream) -> std::io::Result<(u8, Vec<u8>)> {
-    use std::io::Read;
+    
     let mut header = [0u8; 2];
     read_exact(stream, &mut header)?;
     let fin = (header[0] & 0x80) != 0;
@@ -246,7 +224,7 @@ pub(crate) fn ws_read_frame(stream: &mut std::net::TcpStream) -> std::io::Result
         Ok((opcode, payload))
     } else {
         // Fragmented: keep reading until a FIN frame arrives (concatenate).
-        let (next_op, mut rest) = ws_read_frame(stream)?;
+        let (next_op, rest) = ws_read_frame(stream)?;
         let _ = next_op;
         payload.extend_from_slice(&rest);
         Ok((opcode, payload))

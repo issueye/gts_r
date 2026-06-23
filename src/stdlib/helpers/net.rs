@@ -1,5 +1,3 @@
-use super::*;
-
 /// Resolve a host/port into a single `SocketAddr`. Accepts both literal IP
 /// addresses (no DNS) and hostnames (via the OS resolver).
 pub(crate) fn resolve_socket_addr(host: &str, port: u16) -> std::io::Result<std::net::SocketAddr> {

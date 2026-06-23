@@ -8,8 +8,7 @@
 //!
 //! TODO: Full implementation in Phase 3
 
-use crate::gtp::frame::{Frame, GtpError, Value};
-use crate::gtp::transport::Transport;
+use crate::gtp::frame::Value;
 use std::collections::HashMap;
 use std::io;
 

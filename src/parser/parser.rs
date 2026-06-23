@@ -9,7 +9,6 @@
 //! parenthesized expressions), the parser keeps a replay buffer: tokens read
 //! during a speculative parse are captured and can be re-injected.
 
-use crate::ast::*;
 // Re-export the building blocks so submodules can pull them in with `use super::*`.
 pub use crate::ast::*;
 pub use crate::lexer::{Lexer, Token, TokenKind};

@@ -6,9 +6,8 @@ use std::rc::Rc;
 
 use crate::ast::*;
 use crate::object::*;
-use crate::parser::parse_number_literal_value;
 
-use super::eval_core::{control_signal, eval_block, eval_stmt, BREAK_SIGNAL, CONTINUE_SIGNAL};
+use super::eval_core::eval_block;
 use super::match_eval::eval_match;
 use super::string_lit::{eval_regexp_lit, eval_string_lit, eval_template};
 

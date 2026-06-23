@@ -8,12 +8,9 @@
 
 use std::collections::{HashSet, VecDeque};
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self};
 use std::path::{Path, PathBuf};
 
-use crate::ast::{Expr, Stmt};
-use crate::lexer::Lexer;
-use crate::parser::Parser;
 
 /// 模块依赖图
 #[derive(Debug)]
@@ -212,7 +209,7 @@ fn extract_import(line: &str) -> Option<&str> {
 
 /// 将模块内容转换为 IIFE（立即执行函数表达式）
 fn wrap_module(path: &Path, content: &str) -> String {
-    let name = path
+    let _name = path
         .file_stem()
         .and_then(|n| n.to_str())
         .unwrap_or("module");

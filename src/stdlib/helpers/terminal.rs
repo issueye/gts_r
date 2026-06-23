@@ -1,4 +1,3 @@
-use super::*;
 
 // ---------------------------------------------------------------------------
 // rate-limit: token-bucket rate limiter (@std/rate-limit)

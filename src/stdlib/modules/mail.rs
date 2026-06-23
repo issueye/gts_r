@@ -1,36 +1,14 @@
-use std::cell::Cell;
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::env;
-use std::fs;
-use std::fs::OpenOptions;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf, MAIN_SEPARATOR, MAIN_SEPARATOR_STR};
 use std::rc::Rc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-#[allow(unused_imports)]
-use std::process::Command;
-#[allow(unused_imports)]
-use std::process::Stdio;
 
-use flate2::read::GzDecoder;
-use flate2::write::GzEncoder;
-use flate2::Compression;
-#[allow(unused_imports)]
-use regex::Regex;
 
 use super::super::helpers::*;
 use super::time::{parse_time_ms, time_from_object, utc_parts_from_ms};
-#[allow(unused_imports)]
-use crate::ast::Position;
-#[allow(unused_imports)]
 use crate::object::{
-    bool_obj, format_number, new_error, num_obj, str_obj, strict_equal, ArrayData, Builtin,
+    new_error, str_obj,
     CallContext, HashData, Object,
 };
-#[allow(unused_imports)]
-use crate::VERSION;
 
 pub(crate) fn mail_module() -> Object {
     module(vec![
@@ -260,7 +238,7 @@ fn parse_rfc5322_headers(block: &str) -> Object {
     let hash = Rc::new(RefCell::new(HashData::default()));
     let mut current_name: Option<String> = None;
     let mut current_vals: Vec<String> = Vec::new();
-    let mut flush =
+    let flush =
         |name: &mut Option<String>, vals: &mut Vec<String>, hash: &Rc<RefCell<HashData>>| {
             if let Some(n) = name.take() {
                 let arr: Vec<Object> = vals.drain(..).map(str_obj).collect();

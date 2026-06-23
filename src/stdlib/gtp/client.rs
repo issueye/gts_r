@@ -239,8 +239,8 @@ fn gtp_call(
 /// Send a raw frame
 fn gtp_send(
     ctx: &mut CallContext,
-    conn: &Rc<RefCell<Box<dyn Transport>>>,
-    args: &[Object],
+    _conn: &Rc<RefCell<Box<dyn Transport>>>,
+    _args: &[Object],
 ) -> Object {
     // TODO: Parse frame from object
     new_error(ctx.pos.clone(), "gtp.send: not yet implemented")
@@ -287,8 +287,8 @@ fn object_to_gtp_value(obj: &Object) -> Value {
                 .collect();
             Value::array(items)
         }
-        Object::Hash(h) => {
-            let mut fields = std::collections::HashMap::new();
+        Object::Hash(_h) => {
+            let fields = std::collections::HashMap::new();
             // Note: HashData doesn't expose iteration, so this is simplified
             // In a full implementation, we'd need to iterate over fields
             Value::object(fields)

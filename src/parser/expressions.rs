@@ -1,6 +1,6 @@
 //! Expression parsing (Pratt-style).
 
-use super::{precedence_of, Parser, Prec};
+use super::{Parser, Prec};
 use crate::ast::*;
 use crate::lexer::{is_keyword, TokenKind};
 

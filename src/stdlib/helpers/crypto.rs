@@ -1,5 +1,3 @@
-use super::*;
-
 /// Identify the hash family from an algorithm name (case-insensitive over the
 /// two spellings the Go original accepts: lower or upper).
 pub(crate) fn hash_kind(name: &str) -> Option<HashKind> {

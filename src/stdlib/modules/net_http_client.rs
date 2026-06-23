@@ -1,37 +1,15 @@
-use std::cell::Cell;
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::env;
-use std::fs;
-use std::fs::OpenOptions;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf, MAIN_SEPARATOR, MAIN_SEPARATOR_STR};
 use std::rc::Rc;
 use std::sync::OnceLock;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-#[allow(unused_imports)]
-use std::process::Command;
-#[allow(unused_imports)]
-use std::process::Stdio;
 
-use flate2::read::GzDecoder;
-use flate2::write::GzEncoder;
-use flate2::Compression;
-#[allow(unused_imports)]
-use regex::Regex;
 
 use super::super::helpers::*;
 use super::stream::stream_from_text_object;
-#[allow(unused_imports)]
-use crate::ast::Position;
-#[allow(unused_imports)]
 use crate::object::{
-    bool_obj, format_number, new_error, num_obj, str_obj, strict_equal, ArrayData,
-    AsyncCompletionData, AsyncHttpResponse, Builtin, CallContext, HashData, Object, Promise,
+    bool_obj, new_error, num_obj, str_obj,
+    AsyncCompletionData, AsyncHttpResponse, CallContext, HashData, Object, Promise,
 };
-#[allow(unused_imports)]
-use crate::VERSION;
 
 #[cfg(feature = "tokio")]
 use reqwest::Method;

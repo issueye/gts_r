@@ -1,4 +1,3 @@
-use super::*;
 
 // ---------------------------------------------------------------------------
 // text: display-width utilities for terminal-aware string handling.

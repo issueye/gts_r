@@ -8,7 +8,7 @@ use crate::ast::{Position, Stmt};
 use crate::object::*;
 
 use super::eval_core::eval_block;
-use super::expressions::{apply_function, bind_params, eval_expr, is_error_class_name};
+use super::expressions::bind_params;
 use super::iterator::{default_iterator_method, get_iterator_index, SYMBOL_ITERATOR_KEY};
 
 /// Read a named property of a value, dispatching on the value's type.
@@ -532,7 +532,7 @@ fn call_constructor_value(
 
 /// Construct a value from a builtin constructor (new Date(...), new Map(...), etc.).
 pub fn construct_builtin(b: &Builtin, env: &EnvRef, args: &[Object], pos: Position) -> Object {
-    let name = b.name.clone();
+    let _name = b.name.clone();
     let mut ctx = CallContext::new(env, pos);
     (b.func)(&mut ctx, args)
 }

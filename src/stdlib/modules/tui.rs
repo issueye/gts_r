@@ -1,24 +1,9 @@
-use std::cell::Cell;
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::env;
-use std::fs;
-use std::fs::OpenOptions;
-use std::io::{IsTerminal, Read, Write};
-use std::path::{Path, PathBuf, MAIN_SEPARATOR, MAIN_SEPARATOR_STR};
+use std::io::{IsTerminal, Write};
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-#[allow(unused_imports)]
-use std::process::Command;
-#[allow(unused_imports)]
-use std::process::Stdio;
 
-use flate2::read::GzDecoder;
-use flate2::write::GzEncoder;
-use flate2::Compression;
-#[allow(unused_imports)]
-use regex::Regex;
 
 use super::super::helpers::*;
 use super::terminal::{terminal_cols, terminal_rows, terminal_size_object, terminal_style};
@@ -26,15 +11,10 @@ use super::text::{
     text_pad_to_width, text_strip_ansi, text_truncate_to_width, text_truncate_width,
     text_visible_chars, text_visible_width, text_width,
 };
-#[allow(unused_imports)]
-use crate::ast::Position;
-#[allow(unused_imports)]
 use crate::object::{
-    bool_obj, format_number, new_error, num_obj, str_obj, strict_equal, ArrayData, Builtin,
+    bool_obj, new_error, num_obj, str_obj, Builtin,
     CallContext, HashData, Object,
 };
-#[allow(unused_imports)]
-use crate::VERSION;
 
 #[derive(Clone)]
 struct TuiApp {
@@ -573,7 +553,7 @@ fn tui_key_event_message(event: crossterm::event::KeyEvent) -> Object {
 }
 
 fn tui_mouse_event_message(event: crossterm::event::MouseEvent) -> Object {
-    use crossterm::event::{MouseButton, MouseEventKind};
+    use crossterm::event::MouseEventKind;
 
     let (action, button) = match event.kind {
         MouseEventKind::Down(button) => ("down", tui_mouse_button_number(button)),

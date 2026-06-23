@@ -5,14 +5,9 @@
 //! monolithic `stdlib/mod.rs`.
 
 #![allow(dead_code)]
-use std::cell::Cell;
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::env;
 use std::fs;
-use std::fs::OpenOptions;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf, MAIN_SEPARATOR, MAIN_SEPARATOR_STR};
+use std::path::{Path, PathBuf, MAIN_SEPARATOR_STR};
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -21,9 +16,6 @@ use std::process::Command;
 #[allow(unused_imports)]
 use std::process::Stdio;
 
-use flate2::read::GzDecoder;
-use flate2::write::GzEncoder;
-use flate2::Compression;
 #[allow(unused_imports)]
 use regex::Regex;
 
