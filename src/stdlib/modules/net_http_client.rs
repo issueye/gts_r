@@ -39,6 +39,9 @@ struct OwnedHttpRequest {
     body: Option<String>,
     headers: Vec<(String, String)>,
     timeout_ms: Option<u64>,
+    /// Optional proxy URL (e.g. "http://127.0.0.1:7890"). When set, the
+    /// request is routed through the proxy on both the ureq and reqwest paths.
+    proxy: Option<String>,
 }
 
 #[cfg(feature = "tokio")]
@@ -69,6 +72,51 @@ fn http_client_state() -> &'static HttpClientState {
     })
 }
 
+/// Cache of reqwest clients keyed by proxy URL, so repeated requests through
+/// the same proxy reuse a single pooled client. The default (no-proxy) client
+/// lives in `http_client_state()`; this cache only holds proxy-specific ones.
+#[cfg(feature = "tokio")]
+static PROXY_CLIENTS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, reqwest::Client>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Return a reqwest client: the global default when proxy is None, or a cached
+/// proxy-configured client otherwise. Each distinct proxy URL gets its own
+/// pooled client (built once with the same pool settings as the default).
+#[cfg(feature = "tokio")]
+fn reqwest_client_for_proxy(proxy: &Option<String>) -> reqwest::Client {
+    // No proxy: reuse the global default client.
+    let proxy_url = match proxy {
+        None => return http_client_state().client.clone(),
+        Some(p) => p.clone(),
+    };
+
+    let mut cache = PROXY_CLIENTS.lock().expect("proxy client cache poisoned");
+    if let Some(client) = cache.get(&proxy_url) {
+        return client.clone();
+    }
+
+    let proxy = match reqwest::Proxy::all(&proxy_url) {
+        Ok(p) => p,
+        Err(e) => {
+            // Fall back to the default client on an invalid proxy URL rather
+            // than panicking; the request will likely fail with a clearer
+            // network error.
+            eprintln!("invalid proxy '{}': {}", proxy_url, e);
+            return http_client_state().client.clone();
+        }
+    };
+    let client = reqwest::Client::builder()
+        .pool_idle_timeout(std::time::Duration::from_secs(90))
+        .pool_max_idle_per_host(8)
+        .tcp_keepalive(Some(std::time::Duration::from_secs(30)))
+        .proxy(proxy)
+        .build()
+        .expect("build reqwest proxy client");
+    cache.insert(proxy_url, client.clone());
+    client
+}
+
 pub(crate) fn http_client_get(ctx: &mut CallContext, args: &[Object]) -> Object {
     let url = match args.first() {
         Some(Object::String(s)) => s.to_string(),
@@ -84,7 +132,20 @@ pub(crate) fn http_client_get(ctx: &mut CallContext, args: &[Object]) -> Object 
         }
     };
 
-    let mut req = ureq::get(&url);
+    // Optional proxy from the options object.
+    let proxy = match args.first() {
+        Some(Object::Hash(h)) => match h.borrow().get("proxy") {
+            Some(Object::String(s)) if !s.is_empty() => Some(s.to_string()),
+            _ => None,
+        },
+        _ => None,
+    };
+
+    let agent = match ureq_agent(proxy.as_deref()) {
+        Ok(a) => a,
+        Err(e) => return new_error(ctx.pos.clone(), format!("http.get: {}", e)),
+    };
+    let mut req = agent.get(&url);
 
     // Apply headers if provided
     if let Some(Object::Hash(opts)) = args.first() {
@@ -105,7 +166,7 @@ pub(crate) fn http_client_get(ctx: &mut CallContext, args: &[Object]) -> Object 
 }
 
 pub(crate) fn http_client_post(ctx: &mut CallContext, args: &[Object]) -> Object {
-    let (url, body, content_type) = match args.first() {
+    let (url, body, content_type, proxy) = match args.first() {
         Some(Object::String(s)) => {
             let body = args.get(1).map(http_body_to_string).unwrap_or_default();
             let ct = if matches!(args.get(1), Some(Object::Hash(_))) {
@@ -113,7 +174,7 @@ pub(crate) fn http_client_post(ctx: &mut CallContext, args: &[Object]) -> Object
             } else {
                 "text/plain"
             };
-            (s.to_string(), body, ct)
+            (s.to_string(), body, ct, None)
         }
         Some(Object::Hash(h)) => {
             let url = match h.borrow().get("url") {
@@ -126,7 +187,11 @@ pub(crate) fn http_client_post(ctx: &mut CallContext, args: &[Object]) -> Object
                 .map(|obj| http_body_to_string(&obj))
                 .unwrap_or_default();
             let ct = "application/json";
-            (url, body, ct)
+            let proxy = match h.borrow().get("proxy") {
+                Some(Object::String(s)) if !s.is_empty() => Some(s.to_string()),
+                _ => None,
+            };
+            (url, body, ct, proxy)
         }
         _ => {
             return new_error(
@@ -136,7 +201,13 @@ pub(crate) fn http_client_post(ctx: &mut CallContext, args: &[Object]) -> Object
         }
     };
 
-    match ureq::post(&url)
+    let agent = match ureq_agent(proxy.as_deref()) {
+        Ok(a) => a,
+        Err(e) => return new_error(ctx.pos.clone(), format!("http.post: {}", e)),
+    };
+
+    match agent
+        .post(&url)
         .set("Content-Type", content_type)
         .send_string(&body)
     {
@@ -285,12 +356,18 @@ fn owned_http_request_from_args(
         }
     }
 
+    let proxy = match opts.borrow().get("proxy") {
+        Some(Object::String(s)) if !s.is_empty() => Some(s.to_string()),
+        _ => None,
+    };
+
     Ok(OwnedHttpRequest {
         url,
         method,
         body,
         headers: request_headers,
         timeout_ms,
+        proxy,
     })
 }
 
@@ -298,7 +375,7 @@ fn perform_owned_http_request(request: OwnedHttpRequest) -> Result<AsyncHttpResp
     #[cfg(feature = "tokio")]
     {
         let state = http_client_state();
-        let client = state.client.clone();
+        let client = reqwest_client_for_proxy(&request.proxy);
         return state
             .runtime
             .block_on(perform_owned_http_request_tokio(client, request));
@@ -309,9 +386,23 @@ fn perform_owned_http_request(request: OwnedHttpRequest) -> Result<AsyncHttpResp
     }
 }
 
+/// Build a ureq Agent, optionally configured with an HTTP/HTTPS proxy.
+/// A proxy URL of None produces a default agent (equivalent to bare
+/// ureq::get/post/request).
+fn ureq_agent(proxy: Option<&str>) -> Result<ureq::Agent, String> {
+    match proxy {
+        None => Ok(ureq::AgentBuilder::new().build()),
+        Some(url) => {
+            let proxy = ureq::Proxy::new(url).map_err(|e| e.to_string())?;
+            Ok(ureq::AgentBuilder::new().proxy(proxy).build())
+        }
+    }
+}
+
 #[cfg(not(feature = "tokio"))]
 fn perform_owned_http_request_ureq(request: OwnedHttpRequest) -> Result<AsyncHttpResponse, String> {
-    let mut req = ureq::request(&request.method, &request.url);
+    let agent = ureq_agent(request.proxy.as_deref())?;
+    let mut req = agent.request(&request.method, &request.url);
     for (key, value) in request.headers {
         req = req.set(&key, &value);
     }
@@ -439,7 +530,16 @@ pub(crate) fn http_client_stream(ctx: &mut CallContext, args: &[Object]) -> Obje
         .borrow()
         .get("body")
         .map(|obj| http_body_to_string(&obj));
-    let mut req = ureq::request(&method, &url);
+
+    let proxy = match opts.borrow().get("proxy") {
+        Some(Object::String(s)) if !s.is_empty() => Some(s.to_string()),
+        _ => None,
+    };
+    let agent = match ureq_agent(proxy.as_deref()) {
+        Ok(a) => a,
+        Err(e) => return new_error(ctx.pos.clone(), format!("http.stream: {}", e)),
+    };
+    let mut req = agent.request(&method, &url);
 
     if let Some(Object::Number(timeout_ms)) = opts.borrow().get("timeoutMs") {
         if *timeout_ms > 0.0 {
