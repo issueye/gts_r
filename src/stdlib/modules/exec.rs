@@ -1,14 +1,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
 use super::process::process_result;
-use crate::object::{
-    format_number, new_error, str_obj,
-    CallContext, HashData, Object,
-};
+use crate::object::{format_number, new_error, str_obj, CallContext, HashData, Object};
 
 pub(crate) fn exec_module() -> Object {
     module(vec![

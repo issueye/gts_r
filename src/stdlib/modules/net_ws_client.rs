@@ -1,13 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
-use crate::object::{
-    new_error, str_obj,
-    CallContext, HashData, Object,
-};
+use crate::object::{new_error, str_obj, CallContext, HashData, Object};
 
 pub(crate) const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -193,7 +188,6 @@ pub(crate) fn ws_write_frame(
 }
 
 pub(crate) fn ws_read_frame(stream: &mut std::net::TcpStream) -> std::io::Result<(u8, Vec<u8>)> {
-    
     let mut header = [0u8; 2];
     read_exact(stream, &mut header)?;
     let fin = (header[0] & 0x80) != 0;

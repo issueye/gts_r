@@ -1,13 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
-use crate::object::{
-    new_error, num_obj, str_obj,
-    CallContext, HashData, Object,
-};
+use crate::object::{new_error, num_obj, str_obj, CallContext, HashData, Object};
 
 /// A live TCP stream held inside a Hash via a sentinel state cell. The GTS VM
 /// is single-threaded (synchronous tree-walker), so a plain `RefCell` is safe.

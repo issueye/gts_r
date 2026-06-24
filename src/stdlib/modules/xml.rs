@@ -3,13 +3,8 @@ use std::fs;
 use std::ops::Deref;
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
-use crate::object::{
-    new_error, str_obj,
-    CallContext, HashData, Object,
-};
+use crate::object::{new_error, str_obj, CallContext, HashData, Object};
 
 pub(crate) fn xml_module() -> Object {
     module(vec![

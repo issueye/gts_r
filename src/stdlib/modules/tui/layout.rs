@@ -55,21 +55,12 @@ fn measure(node: &TuiNode, max_w: i32) -> (i32, i32) {
             ..
         } => {
             let prompt_w = visible_width(prompt);
-            let content = if value.is_empty() {
-                placeholder
-            } else {
-                value
-            };
+            let content = if value.is_empty() { placeholder } else { value };
             let w = prompt_w + visible_width(content);
             (w.max(1) as i32, 1)
         }
         NodeKind::List { items, .. } => {
-            let w = items
-                .iter()
-                .map(|s| visible_width(s))
-                .max()
-                .unwrap_or(0)
-                + 2; // selection marker "  " / "› "
+            let w = items.iter().map(|s| visible_width(s)).max().unwrap_or(0) + 2; // selection marker "  " / "› "
             (w as i32, items.len() as i32)
         }
         NodeKind::Progress { label, .. } => {
@@ -81,7 +72,10 @@ fn measure(node: &TuiNode, max_w: i32) -> (i32, i32) {
             (w as i32, 1)
         }
         NodeKind::Table {
-            headers, rows, column_widths, ..
+            headers,
+            rows,
+            column_widths,
+            ..
         } => measure_table(headers, rows, column_widths),
         NodeKind::Box { children } => {
             if children.is_empty() {
@@ -132,11 +126,7 @@ fn measure_text(text: &str, wrap: super::node::WrapMode, max_w: i32) -> (i32, i3
     }
 }
 
-fn measure_table(
-    headers: &[String],
-    rows: &[Vec<String>],
-    column_widths: &[i32],
-) -> (i32, i32) {
+fn measure_table(headers: &[String], rows: &[Vec<String>], column_widths: &[i32]) -> (i32, i32) {
     let cols = column_widths.len().max(headers.len());
     if cols == 0 {
         return (0, 0);
@@ -248,7 +238,12 @@ fn position_children(parent: &mut MeasuredNode<'_>) {
                     _ => cursor,
                 };
                 let y = cross_position(parent.node.props.align, content.y, cross, child_cross);
-                let rect = Rect { x, y, w: child_main, h: child_cross };
+                let rect = Rect {
+                    x,
+                    y,
+                    w: child_main,
+                    h: child_cross,
+                };
                 let advance = match parent.node.props.justify {
                     JustifyContent::SpaceBetween => 0, // positions are absolute
                     _ => child_main,
@@ -261,7 +256,12 @@ fn position_children(parent: &mut MeasuredNode<'_>) {
                     _ => cursor,
                 };
                 let x = cross_position(parent.node.props.align, content.x, cross, child_cross);
-                let rect = Rect { x, y, w: child_cross, h: child_main };
+                let rect = Rect {
+                    x,
+                    y,
+                    w: child_cross,
+                    h: child_main,
+                };
                 let advance = match parent.node.props.justify {
                     JustifyContent::SpaceBetween => 0,
                     _ => child_main,
@@ -270,15 +270,18 @@ fn position_children(parent: &mut MeasuredNode<'_>) {
             }
         };
         cursor += advance;
-        sizes[i] = (if matches!(dir, FlexDirection::Row) {
-            child_rect.w
-        } else {
-            child_rect.h
-        }, if matches!(dir, FlexDirection::Row) {
-            child_rect.h
-        } else {
-            child_rect.w
-        });
+        sizes[i] = (
+            if matches!(dir, FlexDirection::Row) {
+                child_rect.w
+            } else {
+                child_rect.h
+            },
+            if matches!(dir, FlexDirection::Row) {
+                child_rect.h
+            } else {
+                child_rect.w
+            },
+        );
         let _ = sizes; // measured sizes already consumed; explicit rect wins.
         let mut measured = MeasuredNode {
             node: child,
@@ -338,7 +341,12 @@ fn distribute_grow(children: &[TuiNode], base: &[i32], free: i32) -> Vec<i32> {
 /// Absolute main-axis start positions for `space-between` (the only justify
 /// mode that needs precomputed positions). For others, returns zeros and the
 /// caller advances a cursor.
-fn main_axis_positions(sizes: &[i32], _main: i32, justify: JustifyContent, _dir: FlexDirection) -> Vec<i32> {
+fn main_axis_positions(
+    sizes: &[i32],
+    _main: i32,
+    justify: JustifyContent,
+    _dir: FlexDirection,
+) -> Vec<i32> {
     if !matches!(justify, JustifyContent::SpaceBetween) || sizes.len() < 2 {
         return vec![0; sizes.len()];
     }
@@ -394,12 +402,15 @@ fn cross_position(align: AlignItems, cross_start: i32, cross_avail: i32, child_c
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::node::{BoxProps, NodeKind, Style, TuiNode};
+    use super::*;
 
     fn text(t: &str) -> TuiNode {
         TuiNode {
-            kind: NodeKind::Text { text: t.into(), wrap: Default::default() },
+            kind: NodeKind::Text {
+                text: t.into(),
+                wrap: Default::default(),
+            },
             style: Style::default(),
             props: BoxProps::default(),
             title: String::new(),
@@ -446,9 +457,20 @@ mod tests {
         // row [abc|xy] in a 80x1 viewport → children at x=0 and x=3.
         let n = row(
             vec![text("abc"), text("xy")],
-            BoxProps { direction: FlexDirection::Row, ..Default::default() },
+            BoxProps {
+                direction: FlexDirection::Row,
+                ..Default::default()
+            },
         );
-        let laid = layout(&n, Rect { x: 0, y: 0, w: 80, h: 1 });
+        let laid = layout(
+            &n,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 80,
+                h: 1,
+            },
+        );
         assert_eq!(laid.children.len(), 2);
         assert_eq!(laid.children[0].rect.x, 0);
         assert_eq!(laid.children[1].rect.x, 3);
@@ -464,15 +486,27 @@ mod tests {
             kind: NodeKind::Box {
                 children: vec![
                     TuiNode {
-                        kind: NodeKind::Text { text: "A".into(), wrap: Default::default() },
+                        kind: NodeKind::Text {
+                            text: "A".into(),
+                            wrap: Default::default(),
+                        },
                         style: Style::default(),
-                        props: BoxProps { width: Some(1), ..Default::default() },
+                        props: BoxProps {
+                            width: Some(1),
+                            ..Default::default()
+                        },
                         title: String::new(),
                     },
                     TuiNode {
-                        kind: NodeKind::Text { text: "".into(), wrap: Default::default() },
+                        kind: NodeKind::Text {
+                            text: "".into(),
+                            wrap: Default::default(),
+                        },
                         style: Style::default(),
-                        props: BoxProps { grow: 1.0, ..Default::default() },
+                        props: BoxProps {
+                            grow: 1.0,
+                            ..Default::default()
+                        },
                         title: String::new(),
                     },
                 ],
@@ -481,7 +515,15 @@ mod tests {
             props: filler_props,
             title: String::new(),
         };
-        let laid = layout(&n, Rect { x: 0, y: 0, w: 80, h: 1 });
+        let laid = layout(
+            &n,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 80,
+                h: 1,
+            },
+        );
         assert_eq!(laid.children[0].rect.w, 1);
         assert_eq!(laid.children[1].rect.w, 79);
     }

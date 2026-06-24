@@ -3,13 +3,8 @@ use std::fs;
 use std::io::Write;
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
-use crate::object::{
-    bool_obj, new_error, num_obj, str_obj,
-    CallContext, HashData, Object,
-};
+use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, HashData, Object};
 
 pub(crate) fn archive_zip_module() -> Object {
     module(vec![
@@ -243,7 +238,6 @@ pub(crate) fn walkdir_inner(
     }
     Ok(())
 }
-
 
 // ===========================================================================
 // P7 batch: buffer / events / jwt / mime / net/ip / retry / stream.

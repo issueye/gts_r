@@ -1,13 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
-use crate::object::{
-    bool_obj, new_error, num_obj, str_obj,
-    CallContext, HashData, Object,
-};
+use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, HashData, Object};
 use crate::VERSION;
 
 pub(crate) fn process_module() -> Object {

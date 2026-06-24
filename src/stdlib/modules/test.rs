@@ -1,13 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
-use crate::object::{
-    new_error, num_obj, strict_equal,
-    CallContext, HashData, Object,
-};
+use crate::object::{new_error, num_obj, strict_equal, CallContext, HashData, Object};
 
 pub(crate) fn test_module() -> Object {
     module(vec![

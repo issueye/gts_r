@@ -188,9 +188,11 @@ impl VirtualMachine {
             if let Some(promise) = self.async_promises.borrow_mut().remove(&completion.id) {
                 match &completion.result {
                     AsyncCompletionResult::Resolve(data) => {
-                        promise.resolve(crate::object::http_stream::async_completion_data_to_object(
-                            data.clone(),
-                        ));
+                        promise.resolve(
+                            crate::object::http_stream::async_completion_data_to_object(
+                                data.clone(),
+                            ),
+                        );
                     }
                     AsyncCompletionResult::Reject(error) => {
                         promise.reject(new_error(Position::default(), error.clone()));

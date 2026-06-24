@@ -1,14 +1,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
 use super::time::{parse_time_ms, time_from_object, utc_parts_from_ms};
-use crate::object::{
-    new_error, str_obj,
-    CallContext, HashData, Object,
-};
+use crate::object::{new_error, str_obj, CallContext, HashData, Object};
 
 pub(crate) fn mail_module() -> Object {
     module(vec![

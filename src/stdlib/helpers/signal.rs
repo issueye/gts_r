@@ -1,4 +1,3 @@
-
 pub(crate) fn supported_signal_names() -> Vec<&'static str> {
     #[cfg(unix)]
     {

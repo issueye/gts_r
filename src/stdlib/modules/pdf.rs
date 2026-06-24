@@ -1,11 +1,5 @@
-
-
-
 use super::super::helpers::*;
-use crate::object::{
-    new_error,
-    CallContext, Object,
-};
+use crate::object::{new_error, CallContext, Object};
 
 pub(crate) fn pdf_module() -> Object {
     module(vec![("info", native("pdf.info", pdf_info))])

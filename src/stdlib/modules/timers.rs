@@ -1,11 +1,5 @@
-
-
-
 use super::super::helpers::*;
-use crate::object::{
-    new_error,
-    CallContext, Object,
-};
+use crate::object::{new_error, CallContext, Object};
 
 pub(crate) fn timers_module() -> Object {
     module(vec![

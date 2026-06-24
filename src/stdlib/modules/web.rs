@@ -3,13 +3,10 @@ use std::cell::RefCell;
 use std::fs;
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
 use super::signal::{ctrlc_set_flag, exact_match, prefix_match};
 use crate::object::{
-    new_error, num_obj, str_obj, Builtin,
-    CallContext, HashData, Object, PromiseState,
+    new_error, num_obj, str_obj, Builtin, CallContext, HashData, Object, PromiseState,
 };
 
 /// The shared handle a worker thread receives from the spawner.

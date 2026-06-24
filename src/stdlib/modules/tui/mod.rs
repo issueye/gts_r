@@ -143,9 +143,18 @@ pub(crate) fn tui_input(ctx: &mut CallContext, args: &[Object]) -> Object {
     let placeholder = h.get_string("placeholder").unwrap_or_default();
     let prompt = h.get_string("prompt").unwrap_or_else(|| "> ".into());
     let focused = h.get_bool("focused").unwrap_or(true);
-    let cursor = h.get_number("cursor").map(|n| n as i32).unwrap_or_else(|| value.chars().count() as i32);
+    let cursor = h
+        .get_number("cursor")
+        .map(|n| n as i32)
+        .unwrap_or_else(|| value.chars().count() as i32);
     node_object(TuiNode {
-        kind: NodeKind::Input { value, cursor, placeholder, prompt, focused },
+        kind: NodeKind::Input {
+            value,
+            cursor,
+            placeholder,
+            prompt,
+            focused,
+        },
         style,
         props,
         title,
@@ -174,7 +183,11 @@ pub(crate) fn tui_list(ctx: &mut CallContext, args: &[Object]) -> Object {
     let selected = h.get_number("selected").map(|n| n as i32).unwrap_or(0);
     let focused = h.get_bool("focused").unwrap_or(true);
     node_object(TuiNode {
-        kind: NodeKind::List { items, selected, focused },
+        kind: NodeKind::List {
+            items,
+            selected,
+            focused,
+        },
         style,
         props,
         title,
@@ -211,7 +224,11 @@ pub(crate) fn tui_table(ctx: &mut CallContext, args: &[Object]) -> Object {
         _ => Vec::new(),
     };
     node_object(TuiNode {
-        kind: NodeKind::Table { headers, rows, column_widths },
+        kind: NodeKind::Table {
+            headers,
+            rows,
+            column_widths,
+        },
         style,
         props,
         title,
@@ -232,7 +249,11 @@ pub(crate) fn tui_progress(ctx: &mut CallContext, args: &[Object]) -> Object {
     let total = h.get_number("total").unwrap_or(100.0);
     let label = h.get_string("label").unwrap_or_default();
     node_object(TuiNode {
-        kind: NodeKind::Progress { value, total, label },
+        kind: NodeKind::Progress {
+            value,
+            total,
+            label,
+        },
         style,
         props,
         title,
@@ -359,11 +380,7 @@ fn children_of(opts: Option<&Object>) -> Vec<TuiNode> {
         _ => return Vec::new(),
     };
     let arr_ref = arr.borrow();
-    arr_ref
-        .elements
-        .iter()
-        .filter_map(child_to_node)
-        .collect()
+    arr_ref.elements.iter().filter_map(child_to_node).collect()
 }
 
 fn child_to_node(value: &Object) -> Option<TuiNode> {
@@ -378,7 +395,10 @@ fn child_to_node(value: &Object) -> Option<TuiNode> {
             None
         }
         Object::String(s) => Some(TuiNode {
-            kind: NodeKind::Text { text: s.to_string(), wrap: WrapMode::Wrap },
+            kind: NodeKind::Text {
+                text: s.to_string(),
+                wrap: WrapMode::Wrap,
+            },
             style: Style::default(),
             props: BoxProps::default(),
             title: String::new(),

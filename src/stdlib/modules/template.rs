@@ -1,12 +1,7 @@
 use std::fs;
 
-
-
 use super::super::helpers::*;
-use crate::object::{
-    new_error, str_obj,
-    CallContext, Object,
-};
+use crate::object::{new_error, str_obj, CallContext, Object};
 
 pub(crate) fn template_module() -> Object {
     module(vec![

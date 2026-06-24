@@ -1,11 +1,5 @@
-
-
-
 use super::super::helpers::*;
-use crate::object::{
-    new_error, num_obj, strict_equal,
-    CallContext, Object,
-};
+use crate::object::{new_error, num_obj, strict_equal, CallContext, Object};
 
 pub(crate) fn collections_module() -> Object {
     module(vec![

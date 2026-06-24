@@ -171,7 +171,9 @@ pub fn node_object(node: TuiNode) -> Object {
     let id = next_node_id();
     let marker = Rc::new(RefCell::new(HashData::default()));
     marker.borrow_mut().set("__kind", str_obj("tuiNode"));
-    marker.borrow_mut().set("__id", crate::object::num_obj(id as f64));
+    marker
+        .borrow_mut()
+        .set("__id", crate::object::num_obj(id as f64));
     TUI_NODES.with(|nodes| nodes.borrow_mut().push((id, node)));
     Object::Hash(marker)
 }
@@ -191,5 +193,11 @@ fn next_node_id() -> usize {
 
 /// Recover a registered node by the id stored in its marker.
 pub fn lookup_node(id: usize) -> Option<TuiNode> {
-    TUI_NODES.with(|nodes| nodes.borrow().iter().find(|(nid, _)| *nid == id).map(|(_, n)| n.clone()))
+    TUI_NODES.with(|nodes| {
+        nodes
+            .borrow()
+            .iter()
+            .find(|(nid, _)| *nid == id)
+            .map(|(_, n)| n.clone())
+    })
 }

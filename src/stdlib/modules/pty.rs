@@ -6,12 +6,8 @@ use std::rc::Rc;
 use std::process::Command;
 use std::process::Stdio;
 
-
 use super::super::helpers::*;
-use crate::object::{
-    new_error, num_obj, str_obj,
-    CallContext, HashData, Object,
-};
+use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, HashData, Object};
 
 /// PTY/子进程的内部状态。
 struct PtyState {
@@ -28,7 +24,7 @@ pub(crate) fn pty_module() -> Object {
 }
 
 /// pty.spawn(cmd, [args...], [opts]) -> pty 实例
-/// 返回的对象含 read/readLine/readText/readTextTimeout/write/writeln/kill/wait/resize/close 方法。
+/// 返回的对象含 read/readLine/readText/readTextTimeout/write/writeln/kill/wait/tryWait/resize/close 方法。
 fn pty_spawn(ctx: &mut CallContext, args: &[Object]) -> Object {
     let cmd_name = match required_string(ctx, "pty.spawn", args, 0, "command") {
         Ok(s) => s,
@@ -155,6 +151,13 @@ fn pty_spawn(ctx: &mut CallContext, args: &[Object]) -> Object {
         native("pty.wait", move |ctx, _args| pty_wait(ctx, &s)),
     );
 
+    // tryWait() -> { running: bool, exitCode?: number }（非阻塞检查子进程状态）
+    let s = state.clone();
+    pty_obj.borrow_mut().set(
+        "tryWait",
+        native("pty.tryWait", move |ctx, _args| pty_try_wait(ctx, &s)),
+    );
+
     // resize(cols, rows) -> undefined（调整大小；管道模型下仅记录尺寸）
     let s = state.clone();
     pty_obj.borrow_mut().set(
@@ -274,6 +277,29 @@ pub(crate) fn pty_wait(ctx: &mut CallContext, state: &Rc<PtyState>) -> Object {
         },
         Err(e) => new_error(ctx.pos.clone(), format!("pty.wait: {e}")),
     }
+}
+
+pub(crate) fn pty_try_wait(ctx: &mut CallContext, state: &Rc<PtyState>) -> Object {
+    let mut guard = state.child.borrow_mut();
+    let Some(child) = guard.as_mut() else {
+        return new_error(ctx.pos.clone(), "pty.tryWait: process not running");
+    };
+    let status = match child.try_wait() {
+        Ok(status) => status,
+        Err(e) => return new_error(ctx.pos.clone(), format!("pty.tryWait: {e}")),
+    };
+    let hash = Rc::new(RefCell::new(HashData::default()));
+    match status {
+        Some(status) => {
+            hash.borrow_mut().set("running", bool_obj(false));
+            hash.borrow_mut()
+                .set("exitCode", num_obj(status.code().unwrap_or(0) as f64));
+        }
+        None => {
+            hash.borrow_mut().set("running", bool_obj(true));
+        }
+    }
+    Object::Hash(hash)
 }
 
 pub(crate) fn pty_resize(ctx: &mut CallContext, args: &[Object], state: &Rc<PtyState>) -> Object {

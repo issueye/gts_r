@@ -6,13 +6,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::UNIX_EPOCH;
 
-
-
 use super::super::helpers::*;
-use crate::object::{
-    bool_obj, new_error, num_obj, str_obj,
-    CallContext, Object,
-};
+use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, Object};
 
 pub(crate) fn fs_module() -> Object {
     module(vec![

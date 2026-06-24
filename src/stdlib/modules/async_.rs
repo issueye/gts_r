@@ -1,12 +1,6 @@
-
-
-
 use super::super::helpers::*;
 use super::net_http_client::{http_client_get, http_client_post, http_client_request};
-use crate::object::{
-    new_error,
-    CallContext, Object,
-};
+use crate::object::{new_error, CallContext, Object};
 
 pub(crate) fn async_module() -> Object {
     module(vec![

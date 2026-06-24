@@ -1,12 +1,7 @@
-
-
 use regex::Regex;
 
 use super::super::helpers::*;
-use crate::object::{
-    new_error, str_obj,
-    CallContext, Object,
-};
+use crate::object::{new_error, str_obj, CallContext, Object};
 
 pub(crate) fn regexp_module() -> Object {
     module(vec![

@@ -1,13 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
-use crate::object::{
-    bool_obj, new_error, num_obj,
-    CallContext, HashData, Object,
-};
+use crate::object::{bool_obj, new_error, num_obj, CallContext, HashData, Object};
 
 pub(crate) const RATE_LIMIT_STATE_KEY: &str = "__rate_limit_state__";
 

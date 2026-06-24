@@ -1,13 +1,8 @@
 use std::env;
 use std::path::{Path, PathBuf, MAIN_SEPARATOR, MAIN_SEPARATOR_STR};
 
-
-
 use super::super::helpers::*;
-use crate::object::{
-    bool_obj, new_error, str_obj,
-    CallContext, Object,
-};
+use crate::object::{bool_obj, new_error, str_obj, CallContext, Object};
 
 pub(crate) fn path_module() -> Object {
     module(vec![

@@ -1,11 +1,5 @@
-
-
-
 use super::super::helpers::*;
-use crate::object::{
-    new_error, num_obj, str_obj,
-    CallContext, Object,
-};
+use crate::object::{new_error, num_obj, str_obj, CallContext, Object};
 
 pub(crate) fn hash_module() -> Object {
     module(vec![

@@ -1,13 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
-use crate::object::{
-    new_error, str_obj,
-    CallContext, HashData, Object,
-};
+use crate::object::{new_error, str_obj, CallContext, HashData, Object};
 
 pub(crate) const SSE_READER_STATE_KEY: &str = "__sse_state__";
 

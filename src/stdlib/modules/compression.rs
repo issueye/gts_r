@@ -1,14 +1,8 @@
-
-
-
 use super::super::helpers::*;
 use super::compress_gzip::{
     bytes_to_latin1_string, gzip_compress_bytes, gzip_decompress_bytes, latin1_string_to_bytes,
 };
-use crate::object::{
-    new_error, str_obj,
-    CallContext, Object,
-};
+use crate::object::{new_error, str_obj, CallContext, Object};
 
 pub(crate) fn compression_module() -> Object {
     module(vec![

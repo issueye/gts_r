@@ -91,7 +91,7 @@ impl Default for TokioRuntime {
 /// Helper to spawn async TCP operations on tokio
 #[cfg(feature = "tokio")]
 pub mod tcp {
-    
+
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 

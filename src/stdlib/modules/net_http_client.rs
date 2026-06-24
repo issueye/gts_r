@@ -2,13 +2,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::OnceLock;
 
-
-
 use super::super::helpers::*;
 use super::stream::stream_from_text_object;
 use crate::object::{
-    bool_obj, new_error, num_obj, str_obj,
-    AsyncCompletionData, AsyncHttpResponse, CallContext, HashData, Object, Promise,
+    bool_obj, new_error, num_obj, str_obj, AsyncCompletionData, AsyncHttpResponse, CallContext,
+    HashData, Object, Promise,
 };
 
 #[cfg(feature = "tokio")]

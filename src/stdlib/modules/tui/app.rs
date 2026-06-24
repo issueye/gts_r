@@ -11,9 +11,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use crate::object::{
-    new_error, num_obj, str_obj, CallContext, HashData, Object,
-};
+use crate::object::{new_error, num_obj, str_obj, CallContext, HashData, Object};
 use crate::stdlib::helpers::{call_script_function, value_to_string};
 
 use super::super::terminal::{terminal_cols, terminal_rows, terminal_size_object};
@@ -30,6 +28,7 @@ pub(crate) struct TuiApp {
     stopped: Cell<bool>,
     /// Last rendered frame (for diff-based incremental drawing to avoid flicker).
     last_frame: RefCell<Option<Vec<String>>>,
+    last_size: Cell<Option<(i32, i32)>>,
 }
 
 thread_local! {
@@ -58,11 +57,19 @@ fn app_marker(app: Rc<TuiApp>) -> Object {
 /// Recover the app bound to the current call's receiver marker.
 fn bound_app(ctx: &CallContext, name: &str) -> Result<Rc<TuiApp>, Object> {
     let Some(Object::Hash(marker)) = ctx.receiver.clone() else {
-        return Err(new_error(ctx.pos.clone(), format!("{name}: missing app receiver")));
+        return Err(new_error(
+            ctx.pos.clone(),
+            format!("{name}: missing app receiver"),
+        ));
     };
     let id = match marker.borrow().get("__id") {
         Some(Object::Number(n)) => *n as usize,
-        _ => return Err(new_error(ctx.pos.clone(), format!("{name}: invalid app receiver"))),
+        _ => {
+            return Err(new_error(
+                ctx.pos.clone(),
+                format!("{name}: invalid app receiver"),
+            ))
+        }
     };
     TUI_APPS.with(|apps| {
         apps.borrow()
@@ -102,6 +109,7 @@ pub(crate) fn tui_create_app(ctx: &mut CallContext, args: &[Object]) -> Object {
         running: Cell::new(false),
         stopped: Cell::new(false),
         last_frame: RefCell::new(None),
+        last_size: Cell::new(None),
     });
     if let Some(init_fn) = hash_function(&spec.borrow(), "init") {
         let size = terminal_size_object();
@@ -119,11 +127,26 @@ pub(crate) fn tui_create_app(ctx: &mut CallContext, args: &[Object]) -> Object {
 fn app_object(app: Rc<TuiApp>) -> Object {
     let obj = Rc::new(RefCell::new(HashData::default()));
     obj.borrow_mut().set("__tuiApp", app_marker(app.clone()));
-    obj.borrow_mut().set("dispatch", native_bound("tui.app.dispatch", app_dispatch, app_marker(app.clone())));
-    obj.borrow_mut().set("render", native_bound("tui.app.render", app_render, app_marker(app.clone())));
-    obj.borrow_mut().set("run", native_bound("tui.app.run", app_run, app_marker(app.clone())));
-    obj.borrow_mut().set("stop", native_bound("tui.app.stop", app_stop, app_marker(app.clone())));
-    obj.borrow_mut().set("state", native_bound("tui.app.state", app_state, app_marker(app)));
+    obj.borrow_mut().set(
+        "dispatch",
+        native_bound("tui.app.dispatch", app_dispatch, app_marker(app.clone())),
+    );
+    obj.borrow_mut().set(
+        "render",
+        native_bound("tui.app.render", app_render, app_marker(app.clone())),
+    );
+    obj.borrow_mut().set(
+        "run",
+        native_bound("tui.app.run", app_run, app_marker(app.clone())),
+    );
+    obj.borrow_mut().set(
+        "stop",
+        native_bound("tui.app.stop", app_stop, app_marker(app.clone())),
+    );
+    obj.borrow_mut().set(
+        "state",
+        native_bound("tui.app.state", app_state, app_marker(app)),
+    );
     Object::Hash(obj)
 }
 
@@ -258,8 +281,24 @@ fn do_render(ctx: &mut CallContext, app: &Rc<TuiApp>, size: Object) -> Result<St
             return Err(result);
         }
         let root = object_to_node(&result).unwrap_or_else(|| fallback_node(&result));
-        let laid = layout(&root, Rect { x: 0, y: 0, w: cols, h: rows });
-        Ok(render_frame(&laid, Rect { x: 0, y: 0, w: cols, h: rows }))
+        let laid = layout(
+            &root,
+            Rect {
+                x: 0,
+                y: 0,
+                w: cols,
+                h: rows,
+            },
+        );
+        Ok(render_frame(
+            &laid,
+            Rect {
+                x: 0,
+                y: 0,
+                w: cols,
+                h: rows,
+            },
+        ))
     } else {
         // No view: dump state as text.
         Ok(value_to_string(&app.state.borrow()))
@@ -289,7 +328,7 @@ fn run_loop(
     alternate_screen: bool,
     hide_cursor: bool,
 ) -> Result<(), Object> {
-    use std::io::{IsTerminal, Write};
+    use std::io::IsTerminal;
     let mut stdout = std::io::stdout();
     let interactive = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     if !interactive {
@@ -307,20 +346,32 @@ fn run_loop(
         cursor::{Hide, Show},
         event::{self, Event, KeyEventKind},
         execute,
-        terminal::{self, disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+        terminal::{
+            self, disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
+            LeaveAlternateScreen,
+        },
     };
 
     if enable_raw_mode().is_err() {
-        return Err(new_error(ctx.pos.clone(), "tui.app.run: failed to enable raw mode"));
+        return Err(new_error(
+            ctx.pos.clone(),
+            "tui.app.run: failed to enable raw mode",
+        ));
     }
     if alternate_screen {
         let _ = execute!(stdout, EnterAlternateScreen);
     }
+    let _ = execute!(
+        stdout,
+        Clear(ClearType::All),
+        crossterm::cursor::MoveTo(0, 0)
+    );
     if hide_cursor {
         let _ = execute!(stdout, Hide);
     }
 
-    let mut last_size = terminal::size().unwrap_or((terminal_cols() as u16, terminal_rows() as u16));
+    let mut last_size =
+        terminal::size().unwrap_or((terminal_cols() as u16, terminal_rows() as u16));
     let _ = do_dispatch(
         ctx,
         app,
@@ -395,7 +446,9 @@ fn run_loop(
 
 fn render_to_stdout(ctx: &mut CallContext, app: &Rc<TuiApp>) -> Result<(), Object> {
     use std::io::Write;
-    let frame = do_render(ctx, app, terminal_size_object())?;
+    let size = terminal_size_object();
+    let dims = size_dims(&size);
+    let frame = do_render(ctx, app, size)?;
 
     // Split the frame into lines for diff-based incremental drawing.
     // This avoids flicker by only rewriting rows that actually changed,
@@ -406,7 +459,9 @@ fn render_to_stdout(ctx: &mut CallContext, app: &Rc<TuiApp>) -> Result<(), Objec
     let prev = app.last_frame.borrow();
 
     match prev.as_ref() {
-        Some(prev_lines) if prev_lines.len() == new_lines.len() => {
+        Some(prev_lines)
+            if prev_lines.len() == new_lines.len() && app.last_size.get() == Some(dims) =>
+        {
             // Diff mode: only write rows that differ. Position cursor with
             // \x1b[<row>;<col>H (1-based) for each changed row.
             let mut any_changed = false;
@@ -426,7 +481,7 @@ fn render_to_stdout(ctx: &mut CallContext, app: &Rc<TuiApp>) -> Result<(), Objec
         _ => {
             // First render or size changed: full repaint.
             // Move cursor home, write each line with \x1b[K to erase residue.
-            out.push_str("\x1b[H");
+            out.push_str("\x1b[2J\x1b[H");
             for (i, line) in new_lines.iter().enumerate() {
                 if i > 0 {
                     out.push('\n');
@@ -445,6 +500,7 @@ fn render_to_stdout(ctx: &mut CallContext, app: &Rc<TuiApp>) -> Result<(), Objec
     let _ = std::io::stdout().flush();
 
     *app.last_frame.borrow_mut() = Some(new_lines);
+    app.last_size.set(Some(dims));
     Ok(())
 }
 
@@ -466,7 +522,10 @@ fn object_to_node(value: &Object) -> Option<TuiNode> {
             None
         }
         Object::String(s) => Some(TuiNode {
-            kind: NodeKind::Text { text: s.to_string(), wrap: super::node::WrapMode::Wrap },
+            kind: NodeKind::Text {
+                text: s.to_string(),
+                wrap: super::node::WrapMode::Wrap,
+            },
             style: super::node::Style::default(),
             props: super::node::BoxProps::default(),
             title: String::new(),
@@ -543,9 +602,12 @@ fn mouse_event_message(event: crossterm::event::MouseEvent) -> Object {
     let hash = Rc::new(RefCell::new(HashData::default()));
     hash.borrow_mut().set("type", str_obj("mouse"));
     hash.borrow_mut().set("action", str_obj(action));
-    hash.borrow_mut().set("button", crate::object::num_obj(button as f64));
-    hash.borrow_mut().set("x", crate::object::num_obj(event.column as f64));
-    hash.borrow_mut().set("y", crate::object::num_obj(event.row as f64));
+    hash.borrow_mut()
+        .set("button", crate::object::num_obj(button as f64));
+    hash.borrow_mut()
+        .set("x", crate::object::num_obj(event.column as f64));
+    hash.borrow_mut()
+        .set("y", crate::object::num_obj(event.row as f64));
     Object::Hash(hash)
 }
 
@@ -564,7 +626,9 @@ fn mouse_button_number(button: crossterm::event::MouseButton) -> i32 {
 
 fn hash_function(hash: &HashData, key: &str) -> Option<Object> {
     match hash.get(key) {
-        Some(Object::Function(_) | Object::Builtin(_) | Object::Closure(_)) => hash.get(key).cloned(),
+        Some(Object::Function(_) | Object::Builtin(_) | Object::Closure(_)) => {
+            hash.get(key).cloned()
+        }
         _ => None,
     }
 }

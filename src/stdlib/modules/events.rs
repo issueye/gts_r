@@ -2,13 +2,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
-use crate::object::{
-    bool_obj, new_error, num_obj,
-    CallContext, HashData, Object,
-};
+use crate::object::{bool_obj, new_error, num_obj, CallContext, HashData, Object};
 
 pub(crate) fn events_module() -> Object {
     module(vec![(

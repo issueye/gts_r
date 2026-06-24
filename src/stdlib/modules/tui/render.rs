@@ -7,7 +7,7 @@
 
 use super::layout::{MeasuredNode, Rect};
 use super::node::{NodeKind, Style, WrapMode};
-use crate::stdlib::helpers::{strip_ansi, visible_width, wrap_line};
+use crate::stdlib::helpers::{rune_width, strip_ansi, visible_width, wrap_line};
 
 /// Paint `root` (and its descendants) into a frame string of `viewport.h`
 /// lines, each up to `viewport.w` cells wide.
@@ -50,17 +50,69 @@ fn paint(node: &MeasuredNode<'_>, grid: &mut [Vec<String>], viewport: Rect) {
         NodeKind::Text { text, wrap } => {
             paint_text(text, *wrap, &node.node.style, node.rect, grid, viewport);
         }
-        NodeKind::Input { value, cursor, placeholder, prompt, focused } => {
-            paint_input(value, *cursor, placeholder, prompt, *focused, &node.node.style, node.rect, grid, viewport);
+        NodeKind::Input {
+            value,
+            cursor,
+            placeholder,
+            prompt,
+            focused,
+        } => {
+            paint_input(
+                value,
+                *cursor,
+                placeholder,
+                prompt,
+                *focused,
+                &node.node.style,
+                node.rect,
+                grid,
+                viewport,
+            );
         }
-        NodeKind::List { items, selected, focused } => {
-            paint_list(items, *selected, *focused, &node.node.style, node.rect, grid, viewport);
+        NodeKind::List {
+            items,
+            selected,
+            focused,
+        } => {
+            paint_list(
+                items,
+                *selected,
+                *focused,
+                &node.node.style,
+                node.rect,
+                grid,
+                viewport,
+            );
         }
-        NodeKind::Table { headers, rows, column_widths } => {
-            paint_table(headers, rows, column_widths, &node.node.style, node.rect, grid, viewport);
+        NodeKind::Table {
+            headers,
+            rows,
+            column_widths,
+        } => {
+            paint_table(
+                headers,
+                rows,
+                column_widths,
+                &node.node.style,
+                node.rect,
+                grid,
+                viewport,
+            );
         }
-        NodeKind::Progress { value, total, label } => {
-            paint_progress(*value, *total, label, &node.node.style, node.rect, grid, viewport);
+        NodeKind::Progress {
+            value,
+            total,
+            label,
+        } => {
+            paint_progress(
+                *value,
+                *total,
+                label,
+                &node.node.style,
+                node.rect,
+                grid,
+                viewport,
+            );
         }
         NodeKind::Checkbox { checked, label } => {
             paint_checkbox(*checked, label, &node.node.style, node.rect, grid, viewport);
@@ -70,7 +122,6 @@ fn paint(node: &MeasuredNode<'_>, grid: &mut [Vec<String>], viewport: Rect) {
 
 /// Draw a single-line box border around `node.rect`, with an optional title.
 fn draw_border(node: &MeasuredNode<'_>, grid: &mut [Vec<String>], viewport: Rect) {
-    use super::node::TuiNode;
     let r = clip_rect(node.rect, viewport);
     if r.w < 2 || r.h < 2 {
         return;
@@ -147,13 +198,22 @@ fn paint_text(
         if displayed.chars().count() > inner.w as usize {
             displayed = match wrap {
                 WrapMode::End => {
-                    let kept: String = displayed.chars().take(inner.w.saturating_sub(1) as usize).collect();
+                    let kept: String = displayed
+                        .chars()
+                        .take(inner.w.saturating_sub(1) as usize)
+                        .collect();
                     format!("{}…", kept)
                 }
                 _ => displayed.chars().take(inner.w as usize).collect(),
             };
         }
-        write_row(grid, inner.x, inner.y + row as i32, &styled(&displayed), viewport);
+        write_row(
+            grid,
+            inner.x,
+            inner.y + row as i32,
+            &styled(&displayed),
+            viewport,
+        );
     }
 }
 
@@ -191,20 +251,31 @@ fn write_row(grid: &mut [Vec<String>], x: i32, y: i32, text: &str, viewport: Rec
         if col >= viewport.w {
             break;
         }
-        // One UTF-8 char.
+        // One UTF-8 char. Advance by terminal display width, not by scalar
+        // count, so CJK glyphs do not push the physical terminal into an
+        // unintended wrap that leaves stale rows behind.
         let start = i;
         i += 1;
         while i < bytes.len() && (bytes[i] & 0xc0) == 0x80 {
             i += 1;
         }
-        if col >= 0 {
-            if let Some(cell) = row.get_mut(col as usize) {
-                if let Ok(ch) = std::str::from_utf8(&bytes[start..i]) {
+        if let Ok(ch) = std::str::from_utf8(&bytes[start..i]) {
+            let rune = ch.chars().next().unwrap_or('\u{fffd}');
+            let width = rune_width(rune).max(1) as i32;
+            if col >= 0 && col < viewport.w {
+                if let Some(cell) = row.get_mut(col as usize) {
                     *cell = ch.to_string();
                 }
+                for pad_col in (col + 1)..(col + width).min(viewport.w) {
+                    if let Some(cell) = row.get_mut(pad_col as usize) {
+                        *cell = String::new();
+                    }
+                }
             }
+            col += width;
+        } else {
+            col += 1;
         }
-        col += 1;
     }
 }
 
@@ -326,10 +397,22 @@ fn paint_input(
     }
     let prompt_w = visible_width(prompt) as i32;
     let value_w = (inner.w - prompt_w).max(1);
-    write_row(grid, inner.x, inner.y, &style_apply(style, prompt), viewport);
+    write_row(
+        grid,
+        inner.x,
+        inner.y,
+        &style_apply(style, prompt),
+        viewport,
+    );
 
     let display = if value.is_empty() && !placeholder.is_empty() {
-        style_apply(&Style { dim: true, ..Style::default() }, placeholder)
+        style_apply(
+            &Style {
+                dim: true,
+                ..Style::default()
+            },
+            placeholder,
+        )
     } else {
         let chars: Vec<char> = value.chars().collect();
         let cur = (cursor.max(0) as usize).min(chars.len());
@@ -341,9 +424,8 @@ fn paint_input(
             value.to_string()
         }
     };
-    let _ = value_w;
-    let cropped = crop_to_width(&display, inner.w as usize);
-    write_row(grid, inner.x, inner.y, &cropped, viewport);
+    let cropped = crop_to_width(&display, value_w as usize);
+    write_row(grid, inner.x + prompt_w, inner.y, &cropped, viewport);
 }
 
 fn paint_list(
@@ -364,9 +446,21 @@ fn paint_list(
         let marker = if is_sel { "› " } else { "  " };
         let line = format!("{}{}", marker, item);
         let rendered = if is_sel && focused {
-            style_apply(&Style { inverse: true, ..style.clone() }, &line)
+            style_apply(
+                &Style {
+                    inverse: true,
+                    ..style.clone()
+                },
+                &line,
+            )
         } else if is_sel {
-            style_apply(&Style { bold: true, ..style.clone() }, &line)
+            style_apply(
+                &Style {
+                    bold: true,
+                    ..style.clone()
+                },
+                &line,
+            )
         } else {
             line
         };
@@ -414,7 +508,10 @@ fn paint_table(
     let mut render_row = |cells: &[String], y: i32, bold: bool| {
         let mut x = inner.x;
         let row_style = if bold {
-            Style { bold: true, ..style.clone() }
+            Style {
+                bold: true,
+                ..style.clone()
+            }
         } else {
             style.clone()
         };
@@ -462,8 +559,8 @@ fn paint_progress(
     };
     let bar_w = inner.w - 2; // [  ]
     let filled = (ratio * bar_w as f64).round() as i32;
-    let bar: String = "█".repeat(filled.max(0) as usize)
-        + &"░".repeat((bar_w - filled.max(0)).max(0) as usize);
+    let bar: String =
+        "█".repeat(filled.max(0) as usize) + &"░".repeat((bar_w - filled.max(0)).max(0) as usize);
     let line = if label.is_empty() {
         format!("[{}]", bar)
     } else {
@@ -529,15 +626,20 @@ fn crop_to_width(s: &str, width: usize) -> String {
         if used >= width {
             break;
         }
-        // Copy one UTF-8 char.
+        // Copy one UTF-8 char, accounting for terminal display width.
         let start = i;
         i += 1;
         while i < bytes.len() && (bytes[i] & 0xc0) == 0x80 {
             i += 1;
         }
         if let Ok(ch) = std::str::from_utf8(&bytes[start..i]) {
+            let rune = ch.chars().next().unwrap_or('\u{fffd}');
+            let w = rune_width(rune).max(1);
+            if used + w > width {
+                break;
+            }
             out.push_str(ch);
-            used += 1;
+            used += w;
         }
     }
     if used >= width {
@@ -560,13 +662,16 @@ fn pad_to_width(s: &str, width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::layout::layout;
     use super::super::node::{BoxProps, NodeKind, Style, TuiNode, WrapMode};
+    use super::*;
 
     fn text_node(t: &str) -> TuiNode {
         TuiNode {
-            kind: NodeKind::Text { text: t.into(), wrap: WrapMode::Truncate },
+            kind: NodeKind::Text {
+                text: t.into(),
+                wrap: WrapMode::Truncate,
+            },
             style: Style::default(),
             props: BoxProps::default(),
             title: String::new(),
@@ -576,22 +681,125 @@ mod tests {
     #[test]
     fn renders_single_text() {
         let node = text_node("Hi");
-        let laid = layout(&node, Rect { x: 0, y: 0, w: 10, h: 1 });
-        let frame = render_frame(&laid, Rect { x: 0, y: 0, w: 10, h: 1 });
+        let laid = layout(
+            &node,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 10,
+                h: 1,
+            },
+        );
+        let frame = render_frame(
+            &laid,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 10,
+                h: 1,
+            },
+        );
         // "Hi" left-aligned, padded to width 10.
         assert_eq!(frame, "Hi        ");
     }
 
     #[test]
-    fn renders_box_with_border() {
+    fn renders_wide_text_without_overflowing_display_width() {
+        let node = text_node("你好");
+        let laid = layout(
+            &node,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 6,
+                h: 1,
+            },
+        );
+        let frame = render_frame(
+            &laid,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 6,
+                h: 1,
+            },
+        );
+        assert_eq!(visible_width(&frame), 6);
+        assert_eq!(frame, "你好  ");
+    }
+
+    #[test]
+    fn input_preserves_prompt_and_wide_value_width() {
         let node = TuiNode {
-            kind: NodeKind::Box { children: vec![text_node("X")] },
+            kind: NodeKind::Input {
+                value: "你".into(),
+                cursor: 1,
+                placeholder: String::new(),
+                prompt: "> ".into(),
+                focused: false,
+            },
             style: Style::default(),
-            props: BoxProps { border: true, width: Some(5), height: Some(3), ..Default::default() },
+            props: BoxProps {
+                width: Some(6),
+                ..Default::default()
+            },
             title: String::new(),
         };
-        let laid = layout(&node, Rect { x: 0, y: 0, w: 5, h: 3 });
-        let frame = render_frame(&laid, Rect { x: 0, y: 0, w: 5, h: 3 });
+        let laid = layout(
+            &node,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 6,
+                h: 1,
+            },
+        );
+        let frame = render_frame(
+            &laid,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 6,
+                h: 1,
+            },
+        );
+        assert_eq!(visible_width(&frame), 6);
+        assert_eq!(frame, "> 你  ");
+    }
+
+    #[test]
+    fn renders_box_with_border() {
+        let node = TuiNode {
+            kind: NodeKind::Box {
+                children: vec![text_node("X")],
+            },
+            style: Style::default(),
+            props: BoxProps {
+                border: true,
+                width: Some(5),
+                height: Some(3),
+                ..Default::default()
+            },
+            title: String::new(),
+        };
+        let laid = layout(
+            &node,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 5,
+                h: 3,
+            },
+        );
+        let frame = render_frame(
+            &laid,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 5,
+                h: 3,
+            },
+        );
         let lines: Vec<&str> = frame.lines().collect();
         assert_eq!(lines[0], "┌───┐");
         assert_eq!(lines[1], "│X  │");
@@ -601,13 +809,36 @@ mod tests {
     #[test]
     fn renders_progress_bar() {
         let node = TuiNode {
-            kind: NodeKind::Progress { value: 5.0, total: 10.0, label: String::new() },
+            kind: NodeKind::Progress {
+                value: 5.0,
+                total: 10.0,
+                label: String::new(),
+            },
             style: Style::default(),
-            props: BoxProps { width: Some(8), ..Default::default() },
+            props: BoxProps {
+                width: Some(8),
+                ..Default::default()
+            },
             title: String::new(),
         };
-        let laid = layout(&node, Rect { x: 0, y: 0, w: 8, h: 1 });
-        let frame = render_frame(&laid, Rect { x: 0, y: 0, w: 8, h: 1 });
+        let laid = layout(
+            &node,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 8,
+                h: 1,
+            },
+        );
+        let frame = render_frame(
+            &laid,
+            Rect {
+                x: 0,
+                y: 0,
+                w: 8,
+                h: 1,
+            },
+        );
         // [███░░░] = 8 chars total (6 inner, 3 filled).
         assert_eq!(frame, "[███░░░]");
     }

@@ -1,11 +1,5 @@
-
-
-
 use super::super::helpers::*;
-use crate::object::{
-    bool_obj, new_error, str_obj,
-    CallContext, Object,
-};
+use crate::object::{bool_obj, new_error, str_obj, CallContext, Object};
 
 pub(crate) fn jwt_module() -> Object {
     module(vec![

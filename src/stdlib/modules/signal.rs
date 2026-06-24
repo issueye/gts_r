@@ -1,13 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
-use crate::object::{
-    new_error, str_obj, ArrayData,
-    CallContext, HashData, Object,
-};
+use crate::object::{new_error, str_obj, ArrayData, CallContext, HashData, Object};
 
 /// Best-effort Ctrl+C handler that flips a shutdown flag. Cross-platform via
 /// the OS signal API. If a handler is already installed (e.g. another listen),

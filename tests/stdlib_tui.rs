@@ -71,7 +71,11 @@ println(typeof n);
 println(n.__kind);
 "#;
     let output = run_script(&dir, script);
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let out = stdout_of(&output);
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines[0], "object");
@@ -95,7 +99,11 @@ let frame = app.render({cols: 10, rows: 1});
 println(frame);
 "#;
     let output = run_script(&dir, script);
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let out = stdout_of(&output);
     // "Hello" left-aligned, padded to 10 cols on a single line (no trim: the
     // trailing spaces are part of the frame).
@@ -121,7 +129,11 @@ let frame = app.render({cols: 8, rows: 1});
 println(frame);
 "#;
     let output = run_script(&dir, script);
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let out = stdout_of(&output);
     assert_eq!(out, "ABCD    \n");
     let _ = fs::remove_dir_all(dir);
@@ -147,7 +159,11 @@ println(frame);
 println("END");
 "#;
     let output = run_script(&dir, script);
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let out = stdout_of(&output);
     let lines: Vec<&str> = out.lines().collect();
     let frame_start = lines.iter().position(|l| *l == "FRAME").unwrap() + 1;
@@ -177,7 +193,11 @@ println(frame);
 println("END");
 "#;
     let output = run_script(&dir, script);
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let out = stdout_of(&output);
     let lines: Vec<&str> = out.lines().collect();
     let frame_start = lines.iter().position(|l| *l == "FRAME").unwrap() + 1;
@@ -203,7 +223,11 @@ let frame = app.render({cols: 8, rows: 1});
 println(frame);
 "#;
     let output = run_script(&dir, script);
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let out = stdout_of(&output);
     assert_eq!(out.trim_end(), "[███░░░]");
     let _ = fs::remove_dir_all(dir);
@@ -232,7 +256,11 @@ println(frame);
 println("END");
 "#;
     let output = run_script(&dir, script);
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let out = stdout_of(&output);
     let lines: Vec<&str> = out.lines().collect();
     let frame_start = lines.iter().position(|l| *l == "FRAME").unwrap() + 1;
@@ -260,7 +288,11 @@ println(frame);
 println("END");
 "#;
     let output = run_script(&dir, script);
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let out = stdout_of(&output);
     let lines: Vec<&str> = out.lines().collect();
     let frame_start = lines.iter().position(|l| *l == "FRAME").unwrap() + 1;
@@ -299,7 +331,11 @@ println(before);
 println(after);
 "#;
     let output = run_script(&dir, script);
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let out = stdout_of(&output);
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines[0], "2");
@@ -319,7 +355,11 @@ let caps = term.capabilities();
 println(caps.rawMode);
 "#;
     let output = run_script(&dir, script);
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let out = stdout_of(&output);
     assert_eq!(out.trim_end(), "true");
     let _ = fs::remove_dir_all(dir);

@@ -1,11 +1,5 @@
-
-
-
 use super::super::helpers::*;
-use crate::object::{
-    str_obj,
-    CallContext, Object,
-};
+use crate::object::{str_obj, CallContext, Object};
 
 pub(crate) fn diff_module() -> Object {
     module(vec![

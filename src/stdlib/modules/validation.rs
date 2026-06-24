@@ -1,11 +1,5 @@
-
-
-
 use super::super::helpers::*;
-use crate::object::{
-    bool_obj, format_number, new_error, str_obj,
-    CallContext, HashData, Object,
-};
+use crate::object::{bool_obj, format_number, new_error, str_obj, CallContext, HashData, Object};
 
 pub(crate) fn validation_module() -> Object {
     module(vec![

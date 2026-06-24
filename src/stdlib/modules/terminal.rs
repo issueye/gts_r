@@ -3,13 +3,8 @@ use std::env;
 use std::io::{IsTerminal, Write};
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
-use crate::object::{
-    bool_obj, new_error, num_obj, str_obj,
-    CallContext, HashData, Object,
-};
+use crate::object::{bool_obj, new_error, num_obj, str_obj, CallContext, HashData, Object};
 
 pub(crate) fn terminal_module() -> Object {
     module(vec![
@@ -50,11 +45,17 @@ pub(crate) fn terminal_module() -> Object {
         // New: real crossterm-backed screen/cursor control.
         (
             "enterAlternateScreen",
-            native("terminal.enterAlternateScreen", terminal_enter_alternate_screen),
+            native(
+                "terminal.enterAlternateScreen",
+                terminal_enter_alternate_screen,
+            ),
         ),
         (
             "leaveAlternateScreen",
-            native("terminal.leaveAlternateScreen", terminal_leave_alternate_screen),
+            native(
+                "terminal.leaveAlternateScreen",
+                terminal_leave_alternate_screen,
+            ),
         ),
         (
             "hideCursor",
@@ -92,7 +93,10 @@ pub(crate) fn terminal_capabilities(_ctx: &mut CallContext, _args: &[Object]) ->
     module(vec![
         ("clearScrollback", bool_obj(true)),
         ("alternateScreen", bool_obj(true)),
-        ("resizeEvents", bool_obj(crossterm::terminal::supports_keyboard_enhancement().is_ok())),
+        (
+            "resizeEvents",
+            bool_obj(crossterm::terminal::supports_keyboard_enhancement().is_ok()),
+        ),
         ("virtualTerminal", bool_obj(true)),
         ("rawMode", bool_obj(true)),
     ])
@@ -217,7 +221,10 @@ pub(crate) fn terminal_start(_ctx: &mut CallContext, _args: &[Object]) -> Object
     module(vec![
         ("active", bool_obj(active)),
         ("write", native("terminal.session.write", terminal_write)),
-        ("writeln", native("terminal.session.writeln", terminal_writeln)),
+        (
+            "writeln",
+            native("terminal.session.writeln", terminal_writeln),
+        ),
         ("size", native("terminal.session.size", terminal_size)),
         (
             "restore",

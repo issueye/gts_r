@@ -1,14 +1,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
 use super::net_ws_client::{compute_accept_key, find_subsequence, new_ws_conn_object, WsConn};
-use crate::object::{
-    new_error, num_obj, str_obj,
-    CallContext, HashData, Object,
-};
+use crate::object::{new_error, num_obj, str_obj, CallContext, HashData, Object};
 
 pub(crate) fn ws_server_module() -> Object {
     module(vec![

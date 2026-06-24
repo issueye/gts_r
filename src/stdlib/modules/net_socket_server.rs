@@ -1,14 +1,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
 use super::net_socket_client::new_socket_conn_object;
-use crate::object::{
-    new_error, num_obj, str_obj,
-    CallContext, HashData, Object,
-};
+use crate::object::{new_error, num_obj, str_obj, CallContext, HashData, Object};
 
 /// The synchronous VM has no event loop, so a Go-style background accept loop
 /// cannot be reproduced. We expose the same `listen` / `createServer` surface

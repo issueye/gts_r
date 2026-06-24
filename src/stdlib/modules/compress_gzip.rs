@@ -1,16 +1,12 @@
 use std::fs;
 use std::io::{Read, Write};
 
-
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 
 use super::super::helpers::*;
-use crate::object::{
-    new_error,
-    CallContext, Object,
-};
+use crate::object::{new_error, CallContext, Object};
 
 pub(crate) fn gzip_module() -> Object {
     module(vec![

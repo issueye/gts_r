@@ -72,8 +72,7 @@ pub fn http_stream_response_to_object(response: AsyncHttpResponse) -> Object {
     obj.borrow_mut()
         .set("headers", headers_hash(&response.headers));
     let body = String::from_utf8_lossy(&response.body).into_owned();
-    obj.borrow_mut()
-        .set("body", stream_from_text(body));
+    obj.borrow_mut().set("body", stream_from_text(body));
     obj.borrow_mut()
         .set("ok", bool_obj((200..300).contains(&response.status)));
     obj.borrow_mut().set(

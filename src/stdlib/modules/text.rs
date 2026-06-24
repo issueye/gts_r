@@ -1,11 +1,5 @@
-
-
-
 use super::super::helpers::*;
-use crate::object::{
-    num_obj, str_obj,
-    CallContext, Object,
-};
+use crate::object::{num_obj, str_obj, CallContext, Object};
 
 pub(crate) fn text_module() -> Object {
     module(vec![

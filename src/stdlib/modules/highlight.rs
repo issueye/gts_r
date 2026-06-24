@@ -1,13 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-
-
 use super::super::helpers::*;
-use crate::object::{
-    str_obj,
-    CallContext, HashData, Object,
-};
+use crate::object::{str_obj, CallContext, HashData, Object};
 
 pub(crate) fn highlight_module() -> Object {
     module(vec![(
