@@ -28,6 +28,8 @@ pub(crate) struct TuiApp {
     state: RefCell<Object>,
     running: Cell<bool>,
     stopped: Cell<bool>,
+    /// Last rendered frame (for diff-based incremental drawing to avoid flicker).
+    last_frame: RefCell<Option<Vec<String>>>,
 }
 
 thread_local! {
@@ -99,6 +101,7 @@ pub(crate) fn tui_create_app(ctx: &mut CallContext, args: &[Object]) -> Object {
         state: RefCell::new(Object::Undefined),
         running: Cell::new(false),
         stopped: Cell::new(false),
+        last_frame: RefCell::new(None),
     });
     if let Some(init_fn) = hash_function(&spec.borrow(), "init") {
         let size = terminal_size_object();
@@ -393,10 +396,55 @@ fn run_loop(
 fn render_to_stdout(ctx: &mut CallContext, app: &Rc<TuiApp>) -> Result<(), Object> {
     use std::io::Write;
     let frame = do_render(ctx, app, terminal_size_object())?;
+
+    // Split the frame into lines for diff-based incremental drawing.
+    // This avoids flicker by only rewriting rows that actually changed,
+    // and erasing trailing residue with \x1b[K (clear-to-end-of-line).
+    let new_lines: Vec<String> = frame.split('\n').map(|s| s.to_string()).collect();
+
+    let mut out = String::with_capacity(frame.len() + new_lines.len() * 8);
+    let prev = app.last_frame.borrow();
+
+    match prev.as_ref() {
+        Some(prev_lines) if prev_lines.len() == new_lines.len() => {
+            // Diff mode: only write rows that differ. Position cursor with
+            // \x1b[<row>;<col>H (1-based) for each changed row.
+            let mut any_changed = false;
+            for (i, new_line) in new_lines.iter().enumerate() {
+                let old_line = &prev_lines[i];
+                if new_line != old_line {
+                    any_changed = true;
+                    // \x1b[H moves to (1,1); add row offset for line i (0-based → 1-based).
+                    out.push_str(&format!("\x1b[{};1H{}\x1b[K", i + 1, new_line));
+                }
+            }
+            if !any_changed {
+                // Frame identical — nothing to write, skip entirely.
+                return Ok(());
+            }
+        }
+        _ => {
+            // First render or size changed: full repaint.
+            // Move cursor home, write each line with \x1b[K to erase residue.
+            out.push_str("\x1b[H");
+            for (i, line) in new_lines.iter().enumerate() {
+                if i > 0 {
+                    out.push('\n');
+                }
+                out.push_str(line);
+                out.push_str("\x1b[K"); // clear to end of line
+            }
+        }
+    }
+
+    drop(prev);
+
     std::io::stdout()
-        .write_all(format!("\x1b[H{}", frame).as_bytes())
+        .write_all(out.as_bytes())
         .map_err(|err| new_error(ctx.pos.clone(), format!("tui.app.render: {}", err)))?;
     let _ = std::io::stdout().flush();
+
+    *app.last_frame.borrow_mut() = Some(new_lines);
     Ok(())
 }
 
